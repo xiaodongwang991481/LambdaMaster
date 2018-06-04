@@ -18,6 +18,23 @@ data class Lambda(val name: String, val package_name: String) : Parcelable {
         return 0
     }
 
+    override fun toString(): String {
+        return "name=$name,package_name=$package_name"
+    }
+
+    override fun equals(other: Any?): Boolean {
+        val otherLambda = other as? Lambda
+        if (otherLambda == null) {
+            return false
+        } else {
+            return name == otherLambda.name
+        }
+    }
+
+    override fun hashCode(): Int {
+        return name.hashCode()
+    }
+
     companion object CREATOR : Parcelable.Creator<Lambda> {
         override fun createFromParcel(parcel: Parcel): Lambda {
             return Lambda(parcel)

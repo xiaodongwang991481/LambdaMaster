@@ -3,16 +3,16 @@ package com.example.xiaodongwang.lambdamaster
 import android.os.Parcel
 import android.os.Parcelable
 
-data class Event(val name: String, val lambda_name: String, val payload: String) : Parcelable {
+data class Event(val name: String, val lambdaHook: Lambda, val payload: String) : Parcelable {
     constructor(parcel: Parcel) : this(
             parcel.readString(),
-            parcel.readString(),
+            parcel.readParcelable(Lambda::class.java.classLoader),
             parcel.readString()) {
     }
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
         parcel.writeString(name)
-        parcel.writeString(lambda_name)
+        parcel.writeParcelable(lambdaHook, flags)
         parcel.writeString(payload)
     }
 
@@ -29,4 +29,5 @@ data class Event(val name: String, val lambda_name: String, val payload: String)
             return arrayOfNulls(size)
         }
     }
+
 }

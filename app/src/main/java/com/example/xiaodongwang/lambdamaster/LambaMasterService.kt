@@ -23,8 +23,8 @@ class LambaMasterService : Service() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
-        return super.onUnbind(intent)
         Log.i(LOG_TAG, "unbind service")
+        return super.onUnbind(intent)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">LambdaMaster</string>
+    <string name="title_activity_lambda_edit">LambdaEditActivity</string>
 </resources>

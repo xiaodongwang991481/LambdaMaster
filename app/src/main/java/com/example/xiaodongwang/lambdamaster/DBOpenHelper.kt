@@ -13,22 +13,17 @@ class DBOpenHelper(
 ) : SQLiteOpenHelper(context, name, factory, version) {
 
     override fun onCreate(db: SQLiteDatabase?) {
+        Log.i(LOG_TAG,"create database")
         db?.let {
             db.execSQL(
                     "CREATE TABLE if not exists lambda(name text primary key, package_name text not null)"
-            )
-            db.execSQL(
-                    "CREATE TABLE if not exists event(" +
-                            "name text not null, lambda_name text not null, payload text not null" +
-                            "primary key (name), " +
-                            " foreign key (lambda_name) references lambda (name) on delete cascade on update cascade)"
             )
         }
     }
 
     override fun onUpgrade(db: SQLiteDatabase?, oldVersion: Int, newVersion: Int) {
+        Log.i(LOG_TAG, "upgrade database")
         db?.let {
-            db.execSQL("drop table if exists event")
             db.execSQL("drop table if exists lambda")
         }
         onCreate(db)
@@ -37,6 +32,7 @@ class DBOpenHelper(
     fun getLambda(name: String) : Lambda? {
         var db = readableDatabase
         db.beginTransaction()
+        var lambdaHook: Lambda? = null
         try {
             var cursor = db.query(
                     "lambda", null, "name=?",
@@ -45,7 +41,7 @@ class DBOpenHelper(
             if (cursor.moveToFirst()) {
                 val existingName = cursor.getString(cursor.getColumnIndex("name"))
                 val packageName = cursor.getString(cursor.getColumnIndex("package_name"))
-                return Lambda(existingName, packageName)
+                lambdaHook = Lambda(existingName, packageName)
             }
             db.setTransactionSuccessful()
         } catch (e: Exception) {
@@ -55,7 +51,8 @@ class DBOpenHelper(
             db.endTransaction()
             db.close()
         }
-        return null
+        Log.i(LOG_TAG, "got lambda $lambdaHook")
+        return lambdaHook
     }
 
     fun getLambdas() : ArrayList<Lambda> {
@@ -80,10 +77,12 @@ class DBOpenHelper(
             db.endTransaction()
             db.close()
         }
+        Log.i(LOG_TAG, "get lambdas: $lambdas")
         return lambdas
     }
 
     fun updateLambda(lambdaHook: Lambda) {
+        Log.i(LOG_TAG, "update lambda $lambdaHook")
         var db = writableDatabase
         db.beginTransaction()
         val name = lambdaHook.name
@@ -121,6 +120,7 @@ class DBOpenHelper(
     }
 
     fun updateLambdas(lambdas: ArrayList<Lambda>) {
+        Log.i(LOG_TAG, "update lambdas: $lambdas")
         var db = writableDatabase
         db.beginTransaction()
         try {

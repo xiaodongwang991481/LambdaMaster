@@ -1,43 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     tools:context=".MainActivity">
-    <Button
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+        <Button
         android:id="@+id/start_service"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Start Service" />
-    <Button
+        <Button
         android:id="@+id/stop_service"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Stop Service" />
-    <EditText
-        android:id="@+id/package_name"
+        <Button
+        android:id="@+id/add_lambda"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Package Name"
-        android:ems="10" />
-    <EditText
+        android:clickable="true"
+        android:text="Add Lambda" />
+        <com.example.xiaodong.lambdamaster.WrappedListView
+        android:id="@+id/lambdas"
+        style="@style/Widget.AppCompat.ListView"
+        android:padding="2dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="vertical"
+        android:divider="@null"
+        android:dividerHeight="1dp"
+        android:listSelector="#ffffff"
+        android:visibility="visible"
+        android:focusable="true" />
+        <Button
+        android:id="@+id/save_lambdas"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clickable="true"
+        android:text="Save Lambdas" />
+        <EditText
         android:id="@+id/action_name"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Action Name"
         android:ems="10" />
-    <EditText
+        <EditText
         android:id="@+id/payload"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Payload"
         android:ems="10"
         android:inputType="textMultiLine" />
-    <Button
+        <Button
         android:id="@+id/send_message"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="Send Message" />
-</LinearLayout>
+    </LinearLayout>
+</ScrollView>
