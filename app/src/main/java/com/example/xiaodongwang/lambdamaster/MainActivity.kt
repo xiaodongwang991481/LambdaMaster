@@ -10,6 +10,11 @@ import android.widget.AdapterView
 import com.example.xiaodong.lambdamaster.DBOpenHelper
 import kotlinx.android.synthetic.main.activity_main.*
 import java.util.*
+import android.content.ComponentName
+import android.os.IBinder
+import android.content.ServiceConnection
+import android.widget.Toast
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -26,6 +31,21 @@ class MainActivity : AppCompatActivity() {
             val intent = Intent(this@MainActivity, LambaMasterService::class.java)
             Log.i(LOG_TAG, "stop service")
             stopService(intent)
+        }
+    }
+
+    inner class BindService : View.OnClickListener {
+        override fun onClick(v: View?) {
+            val intent = Intent(this@MainActivity, LambaMasterService::class.java)
+            Log.i(LOG_TAG, "bind service")
+            bindService(intent, eventConnection, BIND_AUTO_CREATE)
+        }
+    }
+
+    inner class UnbindService : View.OnClickListener {
+        override fun onClick(v: View?) {
+            Log.i(LOG_TAG, "unbind service")
+            unbindService(eventConnection)
         }
     }
 
@@ -55,9 +75,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    inner class EventConnection : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            iEvent = IEvent.Stub.asInterface(service)
+        }
+
+        override fun onServiceDisconnected(name: ComponentName) {
+            iEvent = null
+        }
+    }
+
     private var dbHelper: DBOpenHelper? = null
     private var lambdaList: ArrayList<Lambda>? = null
     private var lambdasAdapter: LambdaAdapter? = null
+    private var iEvent: IEvent? = null
+    private var eventConnection = EventConnection()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         requestPermissions()
@@ -65,6 +97,8 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         start_service.setOnClickListener(StartService())
         stop_service.setOnClickListener(StopService())
+        bind_service.setOnClickListener(BindService())
+        unbind_service.setOnClickListener(UnbindService())
         dbHelper = DBOpenHelper(applicationContext, "my.db", null, 1)
         lambdaList = getInitialLambdaList()
         lambdasAdapter = LambdaAdapter(
@@ -79,6 +113,7 @@ class MainActivity : AppCompatActivity() {
         add_lambda.setOnClickListener(AddLambda())
         lambdas.setOnItemClickListener(EditLambda())
         save_lambdas.setOnClickListener(SaveLambdas())
+        send_message.setOnClickListener(SendMessage())
     }
 
     override fun onSaveInstanceState(outState: Bundle?) {
@@ -197,13 +232,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun onButtonClickSendMessage() {
+        if (iEvent == null) {
+            Log.e(LOG_TAG, "bind interface is not ready")
+            Toast.makeText(
+                    this, "bind interface is not ready", Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
         if (action_name == null || action_name.text.isNullOrBlank()) {
             Log.e(LOG_TAG, "action name is empty")
+            Toast.makeText(
+                    this, "action name is mepty", Toast.LENGTH_SHORT
+            ).show()
             return
         }
         var actionName = action_name.text.toString()
         if (lambdaList == null) {
             Log.e(LOG_TAG, "empty lambda list")
+            Toast.makeText(
+                    this, "empty lambda list", Toast.LENGTH_SHORT
+            ).show()
             return
         }
         var lambdaFound: Lambda? = null
@@ -215,6 +263,9 @@ class MainActivity : AppCompatActivity() {
         }
         if (lambdaFound == null) {
             Log.e(LOG_TAG, "no lambda found in $lambdaList")
+            Toast.makeText(
+                    this, "no lambda found", Toast.LENGTH_SHORT
+            ).show()
             return
         }
         var payLoad = ""
@@ -222,7 +273,8 @@ class MainActivity : AppCompatActivity() {
             payLoad = payload.text.toString()
         }
         var uuid = UUID.randomUUID().toString()
-        var event = Event(uuid, lambdaFound!!, payLoad)
+        var event = Event(uuid, lambdaFound, payLoad)
+        iEvent!!.sendMessage(event)
     }
 
     private fun getInitialLambdaList() : ArrayList<Lambda> {
