@@ -60,8 +60,9 @@ class LambaMasterService : Service() {
             intent.setPackage(event.lambdaHook.package_name)
             intent.putExtra("name", event.name)
             intent.putExtra("payload", event.payload)
-            if (startForegroundService((intent) == null) {
-                Log.e(LOG_TAG, "failed to start the service")
+            Log.i(LOG_TAG, "send message to lambda handler")
+            if (startForegroundService(intent) == null) {
+                Log.e(LOG_TAG, "failed to start the lambda service")
             }
         }
     }

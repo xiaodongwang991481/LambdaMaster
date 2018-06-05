@@ -30,7 +30,9 @@ class MainActivity : AppCompatActivity() {
         override fun onClick(v: View?) {
             val intent = Intent(this@MainActivity, LambaMasterService::class.java)
             Log.i(LOG_TAG, "start service")
-            startForegroundService(intent)
+            if(startForegroundService(intent) == null) {
+                Log.e(LOG_TAG, "failed to start service")
+            }
         }
     }
 
@@ -38,7 +40,9 @@ class MainActivity : AppCompatActivity() {
         override fun onClick(v: View?) {
             val intent = Intent(this@MainActivity, LambaMasterService::class.java)
             Log.i(LOG_TAG, "stop service")
-            stopService(intent)
+            if (!stopService(intent)) {
+                Log.e(LOG_TAG, "failed to stop service")
+            }
         }
     }
 
@@ -46,7 +50,9 @@ class MainActivity : AppCompatActivity() {
         override fun onClick(v: View?) {
             val intent = Intent(this@MainActivity, LambaMasterService::class.java)
             Log.i(LOG_TAG, "bind service")
-            bindService(intent, eventConnection, BIND_AUTO_CREATE)
+            if(!bindService(intent, eventConnection, BIND_AUTO_CREATE)) {
+                Log.e(LOG_TAG, "failed to bind service")
+            }
         }
     }
 
@@ -113,13 +119,19 @@ class MainActivity : AppCompatActivity() {
 
     inner class EventConnection : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
-            Log.i(LOG_TAG, "service is connected")
+            Log.i(LOG_TAG, "service is connected as $service")
             iEvent = IEvent.Stub.asInterface(service)
+            Toast.makeText(
+                    this@MainActivity, "service is bond", Toast.LENGTH_SHORT
+            ).show()
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
             Log.i(LOG_TAG, "service is disconnected")
             iEvent = null
+            Toast.makeText(
+                    this@MainActivity, "service is unbond", Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -152,6 +164,7 @@ class MainActivity : AppCompatActivity() {
         lambdas.setOnItemClickListener(EditLambda())
         lambdas.setOnItemLongClickListener(CopyLambda())
         save_lambdas.setOnClickListener(SaveLambdas())
+        action_name.setOnClickListener(SelectLambda())
         send_message.setOnClickListener(SendMessage())
     }
 
