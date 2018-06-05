@@ -8,6 +8,12 @@ import android.content.ServiceConnection
 import android.os.*
 import android.util.Log
 import android.app.PendingIntent
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.graphics.Color
+import android.os.Build
+
+
 
 
 
@@ -15,14 +21,19 @@ class LambaMasterService : Service() {
 
     private fun startInForeground() {
         val notificationIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, 0)
-
+        val pendingIntent = PendingIntent.getActivity(
+                this, 0, notificationIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT
+        )
         val notification = Notification.Builder(this)
                 .setContentTitle("TEST")
                 .setContentText("HELLO")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentIntent(pendingIntent)
                 .setTicker("TICKER")
+                .setAutoCancel(true)
+                .setWhen(System.currentTimeMillis())
+                .setChannelId(NOTIFICATION_CHANNEL_ID)
                 .build()
         startForeground(101, notification)
     }
@@ -89,6 +100,7 @@ class LambaMasterService : Service() {
         } else {
             Log.i(LOG_TAG, "handler thread is already started")
         }
+        createNotificationChannel()
         startInForeground()
     }
 
@@ -113,7 +125,24 @@ class LambaMasterService : Service() {
         return super.onStartCommand(intent, flags, startId)
     }
 
+    fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            val mChannel = NotificationChannel(
+                    NOTIFICATION_CHANNEL_ID, NOTIFICATION_CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_MAX
+            )
+            mChannel.enableLights(true)
+            // Sets the notification light color for notifications posted to this
+            // channel, if the device supports this feature.
+            mChannel.lightColor = Color.RED
+            notificationManager.createNotificationChannel(mChannel)
+        }
+    }
+
     companion object {
         private val LOG_TAG = "LambaMasterService"
+        private val NOTIFICATION_CHANNEL_ID = "lambda_master"
+        private val NOTIFICATION_CHANNEL_NAME = "lambda_master"
     }
 }
