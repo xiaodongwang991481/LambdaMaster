@@ -1,12 +1,31 @@
 package com.example.xiaodongwang.lambdamaster
 
+import android.app.Notification
 import android.app.Service
+import android.content.ComponentName
 import android.content.Intent
+import android.content.ServiceConnection
 import android.os.*
 import android.util.Log
+import android.app.PendingIntent
+
+
 
 class LambaMasterService : Service() {
 
+    private fun startInForeground() {
+        val notificationIntent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, 0)
+
+        val notification = Notification.Builder(this)
+                .setContentTitle("TEST")
+                .setContentText("HELLO")
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentIntent(pendingIntent)
+                .setTicker("TICKER")
+                .build()
+        startForeground(101, notification)
+    }
     inner class EventBinder() : IEvent.Stub(), IBinder {
         override fun sendMessage(event: Event?) {
             Log.i(LOG_TAG, "receive event $event")
@@ -42,6 +61,16 @@ class LambaMasterService : Service() {
         }
     }
 
+    inner class EventConnection : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            Log.i(LOG_TAG, "service is connected")
+        }
+
+        override fun onServiceDisconnected(name: ComponentName) {
+            Log.i(LOG_TAG, "service is disconnected")
+        }
+    }
+
     private var eventBinder: IBinder = EventBinder()
     private var handlerThread: HandlerThread? = null
     private var eventHandler: EventHandler? = null
@@ -60,16 +89,18 @@ class LambaMasterService : Service() {
         } else {
             Log.i(LOG_TAG, "handler thread is already started")
         }
+        startInForeground()
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         Log.i(LOG_TAG, "destroy service")
         if (handlerThread != null) {
             handlerThread!!.quit()
             handlerThread = null
             eventHandler = null
         }
+        stopForeground(true)
+        super.onDestroy()
     }
 
     override fun onUnbind(intent: Intent?): Boolean {

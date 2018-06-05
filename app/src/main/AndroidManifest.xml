@@ -47,7 +47,6 @@
             android:launchMode="singleTop"
             android:supportsRtl="true"
             android:parentActivityName=".MainActivity"
-
             android:theme="@style/AppTheme">
             <meta-data
                 android:name="android.support.PARENT_ACTIVITY"

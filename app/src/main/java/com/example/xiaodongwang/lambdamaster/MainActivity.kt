@@ -1,6 +1,8 @@
 package com.example.xiaodongwang.lambdamaster
 
 import android.Manifest
+import android.app.AlertDialog
+import android.app.Notification
 import android.content.Intent
 import android.support.v7.app.AppCompatActivity
 import android.os.Bundle
@@ -14,6 +16,12 @@ import android.content.ComponentName
 import android.os.IBinder
 import android.content.ServiceConnection
 import android.widget.Toast
+import android.content.DialogInterface
+import android.app.PendingIntent
+
+
+
+
 
 
 class MainActivity : AppCompatActivity() {
@@ -22,7 +30,7 @@ class MainActivity : AppCompatActivity() {
         override fun onClick(v: View?) {
             val intent = Intent(this@MainActivity, LambaMasterService::class.java)
             Log.i(LOG_TAG, "start service")
-            startService(intent)
+            startForegroundService(intent)
         }
     }
 
@@ -64,8 +72,36 @@ class MainActivity : AppCompatActivity() {
     inner class EditLambda : AdapterView.OnItemClickListener {
         override fun onItemClick(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
             val lambdaHook: Lambda? = lambdas.getItemAtPosition(position) as? Lambda
-            Log.i(LOG_TAG, "item $position long click on $lambdaHook")
+            Log.i(LOG_TAG, "item $position click on $lambdaHook")
             this@MainActivity.onButtonClickEditLambda(lambdaHook!!)
+        }
+    }
+
+    inner class CopyLambda : AdapterView.OnItemLongClickListener {
+        override fun onItemLongClick(parent: AdapterView<*>?, view: View?, position: Int, id: Long): Boolean {
+            val lambdaHook: Lambda? = lambdas.getItemAtPosition(position) as? Lambda
+            Log.i(LOG_TAG, "item $position long click on $lambdaHook")
+            action_name.setText(lambdaHook!!.name)
+            return true
+        }
+    }
+
+    inner class SelectLambda : View.OnClickListener {
+        override fun onClick(v: View?) {
+            var lambdaNames = ArrayList<String>()
+            if (lambdaList != null) {
+                for (item in lambdaList!!) {
+                    lambdaNames.add(item.name)
+                }
+            }
+            val builder = AlertDialog.Builder(this@MainActivity)
+            builder.setTitle("Select Action Name")
+            builder.setItems(lambdaNames.toTypedArray(), DialogInterface.OnClickListener {
+                dialog, which ->
+                action_name.setText(lambdaNames[which])
+            })
+            val alertDialog = builder.create()
+            alertDialog.show()
         }
     }
 
@@ -77,10 +113,12 @@ class MainActivity : AppCompatActivity() {
 
     inner class EventConnection : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            Log.i(LOG_TAG, "service is connected")
             iEvent = IEvent.Stub.asInterface(service)
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
+            Log.i(LOG_TAG, "service is disconnected")
             iEvent = null
         }
     }
@@ -112,6 +150,7 @@ class MainActivity : AppCompatActivity() {
         lambdas.smoothScrollToPosition(0, 0)
         add_lambda.setOnClickListener(AddLambda())
         lambdas.setOnItemClickListener(EditLambda())
+        lambdas.setOnItemLongClickListener(CopyLambda())
         save_lambdas.setOnClickListener(SaveLambdas())
         send_message.setOnClickListener(SendMessage())
     }
