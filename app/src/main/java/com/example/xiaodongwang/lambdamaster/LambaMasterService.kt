@@ -26,17 +26,18 @@ class LambaMasterService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT
         )
         val notification = Notification.Builder(this)
-                .setContentTitle("TEST")
-                .setContentText("HELLO")
+                .setContentTitle("LambdaMasterService")
+                .setContentText("lambda master service")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentIntent(pendingIntent)
                 .setTicker("TICKER")
-                .setAutoCancel(true)
+                .setAutoCancel(false)
                 .setWhen(System.currentTimeMillis())
                 .setChannelId(NOTIFICATION_CHANNEL_ID)
                 .build()
         startForeground(101, notification)
     }
+
     inner class EventBinder() : IEvent.Stub(), IBinder {
         override fun sendMessage(event: Event?) {
             Log.i(LOG_TAG, "receive event $event")
@@ -59,7 +60,7 @@ class LambaMasterService : Service() {
             intent.setPackage(event.lambdaHook.package_name)
             intent.putExtra("name", event.name)
             intent.putExtra("payload", event.payload)
-            if (startService(intent) == null) {
+            if (startForegroundService((intent) == null) {
                 Log.e(LOG_TAG, "failed to start the service")
             }
         }
