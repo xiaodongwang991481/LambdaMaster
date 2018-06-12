@@ -103,7 +103,7 @@ class MainActivity : AppCompatActivity() {
             val builder = AlertDialog.Builder(this@MainActivity)
             builder.setTitle("Select Action Name")
             builder.setItems(lambdaNames.toTypedArray(), DialogInterface.OnClickListener {
-                dialog, which ->
+                _, which ->
                 action_name.setText(lambdaNames[which])
             })
             val alertDialog = builder.create()
@@ -114,6 +114,12 @@ class MainActivity : AppCompatActivity() {
     inner class SendMessage : View.OnClickListener {
         override fun onClick(v: View?) {
             this@MainActivity.onButtonClickSendMessage()
+        }
+    }
+
+    inner class Settings : View.OnClickListener {
+        override fun onClick(v: View?) {
+            this@MainActivity.onButtonClickSettings()
         }
     }
 
@@ -166,6 +172,7 @@ class MainActivity : AppCompatActivity() {
         save_lambdas.setOnClickListener(SaveLambdas())
         action_name.setOnClickListener(SelectLambda())
         send_message.setOnClickListener(SendMessage())
+        settings.setOnClickListener(Settings())
     }
 
     override fun onSaveInstanceState(outState: Bundle?) {
@@ -283,6 +290,11 @@ class MainActivity : AppCompatActivity() {
         lambdasAdapter!!.notifyDataSetChanged()
     }
 
+    fun onButtonClickSettings() {
+        val intent = Intent(this, SettingsActivity::class.java)
+        startActivity(intent)
+    }
+
     fun onButtonClickSendMessage() {
         if (iEvent == null) {
             Log.e(LOG_TAG, "bind interface is not ready")
@@ -325,7 +337,7 @@ class MainActivity : AppCompatActivity() {
             payLoad = payload.text.toString()
         }
         var uuid = UUID.randomUUID().toString()
-        var event = Event(uuid, lambdaFound, payLoad)
+        var event = Event(uuid, lambdaFound.name, payLoad)
         iEvent!!.sendMessage(event)
     }
 

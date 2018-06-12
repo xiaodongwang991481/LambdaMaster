@@ -10,14 +10,47 @@ import android.util.Log
 import android.app.PendingIntent
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.SharedPreferences
 import android.graphics.Color
 import android.os.Build
-
-
-
+import android.preference.PreferenceManager
+import com.example.xiaodong.lambdamaster.DBOpenHelper
+import com.rabbitmq.client.AMQP
+import com.rabbitmq.client.ConnectionFactory
+import com.rabbitmq.client.DefaultConsumer
+import com.rabbitmq.client.Envelope
+import java.util.ArrayList
 
 
 class LambaMasterService : Service() {
+
+    private var dbHelper: DBOpenHelper? = null
+    private var lambdaList: ArrayList<Lambda>? = null
+    private var sharedPrefs: SharedPreferences? = null
+
+    inner class LambdaConsumer(channel) : DefaultConsumer(channel) {
+        override fun handleDelivery(consumerTag: String?, envelope: Envelope?, properties: AMQP.BasicProperties?, body: ByteArray?) {
+            var message = String(body, "UTF-8")
+        }
+    }
+
+    private fun startAMQP() {
+        var factory = ConnectionFactory()
+        factory.host = sharedPrefs!!.getString("rabbitmq_host", "localhost")
+        factory.port = sharedPrefs!!.getString("rabbitmq_port", "5672").toInt()
+        factory.virtualHost = sharedPrefs!!.getString("rabbitmq_virtualhost", "/")
+        factory.username = sharedPrefs!!.getString("rabbitmq_username", "guest")
+        factory.password = sharedPrefs!!.getString("rabbitmq_password", "guest")
+        var exchangeName = sharedPrefs!!.getString("exchange_name")
+        var queueName = sharedPrefs!!.getString("queue_name")
+        var routingKey = sharedPrefs!!.getString("routing_key")
+        var connection = factory.newConnection()
+        var channel = connection.createChannel()
+        channel.exchangeDeclare(exchangeName, "topic")
+        channel.queueDeclare(queueName, false, false, false, null)
+        channel.queueBind(queueName, exchangeName, routingKey)
+        channel.basicConsume(queueName, true, LambdaConsumer(channel))
+    }
 
     private fun startInForeground() {
         val notificationIntent = Intent(this, MainActivity::class.java)
@@ -52,12 +85,29 @@ class LambaMasterService : Service() {
         }
     }
 
+    fun getLambda(actionName: String) : Lambda? {
+        var lambdaFound: Lambda? = null
+        for (lambdaHook in lambdaList!!) {
+            if (lambdaHook.name == actionName) {
+                lambdaFound = lambdaHook
+                break
+            }
+        }
+        return lambdaFound
+    }
+
     inner class EventHandler(looper: Looper) : Handler(looper) {
         override fun handleMessage(msg: Message?) {
             var event = msg!!.obj as Event
             Log.i(LOG_TAG, "event handler receive event $event")
-            val intent = Intent(event.lambdaHook.name)
-            intent.setPackage(event.lambdaHook.package_name)
+            val actionName = event.lambdaName
+            val lambdaHook = getLambda(actionName)
+            if (lambdaHook == null) {
+                Log.e(LOG_TAG, "failed to find lambda by action name $actionName")
+                return
+            }
+            val intent = Intent(lambdaHook.name)
+            intent.setPackage(lambdaHook.package_name)
             intent.putExtra("name", event.name)
             intent.putExtra("payload", event.payload)
             Log.i(LOG_TAG, "send message to lambda handler")
@@ -102,8 +152,15 @@ class LambaMasterService : Service() {
         } else {
             Log.i(LOG_TAG, "handler thread is already started")
         }
+        dbHelper = DBOpenHelper(applicationContext, "my.db", null, 1)
+        lambdaList = getInitialLambdaList()
+        sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
         createNotificationChannel()
         startInForeground()
+    }
+
+    private fun getInitialLambdaList() : ArrayList<Lambda> {
+        return dbHelper!!.getLambdas()
     }
 
     override fun onDestroy() {

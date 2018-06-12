@@ -1,0 +1,70 @@
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- NOTE: EditTextPreference accepts EditText attributes. -->
+    <!-- NOTE: EditTextPreference's summary should be set to its value by the activity code. -->
+    <EditTextPreference
+        android:defaultValue="localhost"
+        android:inputType="text"
+        android:key="rabbitmq_host"
+        android:maxLines="1"
+        android:selectAllOnFocus="true"
+        android:singleLine="true"
+        android:title="Rabbitmq Host" />
+    <EditTextPreference
+        android:defaultValue="/"
+        android:inputType="text"
+        android:key="rabbitmq_virtualhost"
+        android:maxLines="1"
+        android:selectAllOnFocus="true"
+        android:singleLine="true"
+        android:title="Rabbitmq VirtualHost" />
+    <EditTextPreference
+        android:defaultValue="guest"
+        android:inputType="text"
+        android:key="rabbitmq_username"
+        android:maxLines="1"
+        android:selectAllOnFocus="true"
+        android:singleLine="true"
+        android:title="Rabbitmq Username" />
+    <EditTextPreference
+        android:defaultValue="guest"
+        android:inputType="text"
+        android:key="rabbitmq_password"
+        android:maxLines="1"
+        android:selectAllOnFocus="true"
+        android:singleLine="true"
+        android:title="Rabbitmq Password" />
+    <EditTextPreference
+        android:defaultValue="5672"
+        android:inputType="numberDecimal"
+        android:key="rabbitmq_port
+        android:maxLines="1"
+        android:selectAllOnFocus="true"
+        android:singleLine="true"
+        android:title="Rabbitmq port" />
+    <EditTextPreference
+        android:defaultValue="foo"
+        android:inputType="text"
+        android:key="exchange_name"
+        android:maxLines="1"
+        android:selectAllOnFocus="true"
+        android:singleLine="true"
+        android:title="Exchange Name" />
+    <EditTextPreference
+        android:defaultValue="bar"
+        android:inputType="text"
+        android:key="queue_name"
+        android:maxLines="1"
+        android:selectAllOnFocus="true"
+        android:singleLine="true"
+        android:title="Queue Name" />
+    <EditTextPreference
+        android:defaultValue="lambdas"
+        android:inputType="text"
+        android:key="routing_key"
+        android:maxLines="1"
+        android:selectAllOnFocus="true"
+        android:singleLine="true"
+        android:title="Routing Key" />
+
+</PreferenceScreen>
