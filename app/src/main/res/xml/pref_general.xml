@@ -59,7 +59,7 @@
         android:singleLine="true"
         android:title="Queue Name" />
     <EditTextPreference
-        android:defaultValue="lambdas"
+        android:defaultValue=""
         android:inputType="text"
         android:key="routing_key"
         android:maxLines="1"
