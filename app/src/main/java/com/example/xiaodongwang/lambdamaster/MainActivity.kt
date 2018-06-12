@@ -337,7 +337,7 @@ class MainActivity : AppCompatActivity() {
             payLoad = payload.text.toString()
         }
         var uuid = UUID.randomUUID().toString()
-        var event = Event(uuid, lambdaFound.name, payLoad)
+        var event = Event(uuid, lambdaFound, payLoad)
         iEvent!!.sendMessage(event)
     }
 

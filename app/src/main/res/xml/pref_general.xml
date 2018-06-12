@@ -37,7 +37,7 @@
     <EditTextPreference
         android:defaultValue="5672"
         android:inputType="numberDecimal"
-        android:key="rabbitmq_port
+        android:key="rabbitmq_port"
         android:maxLines="1"
         android:selectAllOnFocus="true"
         android:singleLine="true"
