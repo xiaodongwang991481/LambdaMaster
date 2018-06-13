@@ -27,7 +27,9 @@ class LambaMasterService : Service() {
     private var lambdaList: ArrayList<Lambda>? = null
     private var sharedPrefs: SharedPreferences? = null
     @Volatile var amqpThreadRunning = false
-    private var amqpLock = Object()
+    private var amqpRunningLock = Object()
+    @Volatile var amqpThreadNotified = false
+    private var amqpWaitingLock = Object()
 
     inner class LambdaExecuteConsumer(
             val chan: Channel,
@@ -182,8 +184,8 @@ class LambaMasterService : Service() {
         Log.i(LOG_TAG, "broadcast exchange name=$broadcastExchangeName")
         Log.i(LOG_TAG, "anycast exchange name=$anycastExchangeName")
         Log.i(LOG_TAG, "anycast queue name=$anycastQueueName")
-        amqpThreadRunning = true
         thread(start=true) {
+            amqpThreadRunning = true
             var factory = ConnectionFactory()
             factory.host = host
             if (!port.isNullOrBlank()) {
@@ -200,7 +202,7 @@ class LambaMasterService : Service() {
             }
             factory.setAutomaticRecoveryEnabled(true)
             Log.i(LOG_TAG, "start ampq thread")
-            while (amqpThreadRunning) {
+            while (true) {
                 try {
                     var connection = factory.newConnection()
                     var channel = connection!!.createChannel()
@@ -256,28 +258,42 @@ class LambaMasterService : Service() {
                             anycastQueueName, true,
                             LambdaExecuteConsumer(channel, routingKeyExecuteHandlers, defaultRoutingKeyExecuteHandler)
                     )
+                    synchronized(amqpWaitingLock) {
+                        while (!amqpThreadNotified) {
+                            Log.i(LOG_TAG, "amqp thread wait for finish signal")
+                            amqpWaitingLock.wait()
+                        }
+                        Log.i(LOG_TAG, "amqp thread finish signal is received")
+                    }
+                    break
                 } catch (e: Exception) {
                     Log.e(LOG_TAG, e.message)
                     Thread.sleep(1000)
                 }
             }
             Log.i(LOG_TAG, "amqp thread is finished")
-            synchronized(amqpLock) {
-                amqpLock.notifyAll()
+            synchronized(amqpRunningLock) {
+                amqpThreadRunning = false
+                Log.i(LOG_TAG, "amqp thread notify finished")
+                amqpRunningLock.notifyAll()
             }
         }
     }
 
     @Synchronized private fun stopAMQP() {
-        synchronized(amqpLock) {
-            if (amqpThreadRunning) {
-                amqpThreadRunning = false
-                Log.i(LOG_TAG, "stop amqp thread")
-                amqpLock.wait()
-            } else {
-                Log.i(LOG_TAG, "amqp thread is already stopped")
-            }
+        synchronized(amqpWaitingLock) {
+            amqpThreadNotified = true
+            Log.i(LOG_TAG, "amqp thread notify send finish signal")
+            amqpWaitingLock.notifyAll()
         }
+        synchronized(amqpRunningLock) {
+            while (amqpThreadRunning) {
+                Log.i(LOG_TAG, "amqp thread wait for finished")
+                amqpRunningLock.wait()
+            }
+            Log.i(LOG_TAG, "amqp thread is finished")
+        }
+        amqpThreadNotified = false
     }
 
     private fun startInForeground() {

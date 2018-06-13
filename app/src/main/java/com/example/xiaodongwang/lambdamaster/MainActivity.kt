@@ -331,34 +331,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun onButtonClickSendMessageByRabbitMQ() {
-        if (!checkReadyToSendMessage()) {
-            Log.e(LOG_TAG, "not ready to send message")
-            return
-        }
-        if (rabbitmq_routing_key == null || rabbitmq_routing_key.text.isNullOrBlank()) {
-            Log.e(LOG_TAG, "rabbitmq routing key is empty")
-            Toast.makeText(
-                    this, "rabbitmq routing key is empty", Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
-        var routingKey = rabbitmq_routing_key.text.toString()
-        var exchangeName = ""
-        if (rabbitmq_exchange_name != null && !rabbitmq_exchange_name.text.isNullOrBlank()) {
-            exchangeName = rabbitmq_exchange_name.text.toString()
-        }
-        Log.i(LOG_TAG, "routingKey=$routingKey")
-        Log.i(LOG_TAG, "exchangeName=$exchangeName")
-        var actionName = action_name.text.toString()
-        var payLoad = payload.text.toString()
-        var event = RabbitMQMessage(actionName = actionName, properties = payLoad)
-        var gson = Gson()
-        var message = gson.toJson(event)
-        var host = sharedPrefs!!.getString("rabbitmq_host", "localhost")
-        var port = sharedPrefs!!.getString("rabbitmq_port", "5672")
-        var virtualHost = sharedPrefs!!.getString("rabbitmq_virtualhost", "/")
-        var username = sharedPrefs!!.getString("rabbitmq_username", "guest")
-        var password = sharedPrefs!!.getString("rabbitmq_password", "guest")
         if (amqpThreadRunning) {
             Log.e(LOG_TAG, "amqp thread is running")
             Toast.makeText(
@@ -366,8 +338,44 @@ class MainActivity : AppCompatActivity() {
             ).show()
             return
         }
-        amqpThreadRunning = true
+        if (!checkReadyToSendMessage()) {
+            Log.e(LOG_TAG, "not ready to send message")
+            return
+        }
+        var routingKey: String? = null
+        var exchangeName = ""
+        if (rabbitmq_exchange_name != null && !rabbitmq_exchange_name.text.isNullOrBlank()) {
+            exchangeName = rabbitmq_exchange_name.text.toString()
+        }
+        Log.i(LOG_TAG, "exchangeName=$exchangeName")
+        var actionName = action_name.text.toString()
+        var payLoad = payload.text.toString()
+        var message: String? = null
+        if (!exchangeName.isNullOrBlank()) {
+            message = payLoad
+            routingKey = actionName
+        } else {
+            if (rabbitmq_routing_key == null || rabbitmq_routing_key.text.isNullOrBlank()) {
+                Log.e(LOG_TAG, "rabbitmq routing key is empty")
+                Toast.makeText(
+                        this, "rabbitmq routing key is empty", Toast.LENGTH_SHORT
+                ).show()
+                return
+            }
+            routingKey = rabbitmq_routing_key.text.toString()
+            var event = RabbitMQMessage(actionName = actionName, properties = payLoad)
+            var gson = Gson()
+            message = gson.toJson(event)
+        }
+        Log.i(LOG_TAG, "routingKey=$routingKey")
+        Log.i(LOG_TAG, "message=$message")
+        var host = sharedPrefs!!.getString("rabbitmq_host", "localhost")
+        var port = sharedPrefs!!.getString("rabbitmq_port", "5672")
+        var virtualHost = sharedPrefs!!.getString("rabbitmq_virtualhost", "/")
+        var username = sharedPrefs!!.getString("rabbitmq_username", "guest")
+        var password = sharedPrefs!!.getString("rabbitmq_password", "guest")
         thread(start=true) {
+            amqpThreadRunning = true
             var factory = ConnectionFactory()
             factory.host = host
             if (!port.isNullOrBlank()) {
@@ -389,7 +397,7 @@ class MainActivity : AppCompatActivity() {
                 if (!exchangeName.isNullOrBlank()) {
                     channel.exchangeDeclare(exchangeName, "topic")
                 }
-                channel.basicPublish(exchangeName, routingKey, null, message.toByteArray())
+                channel.basicPublish(exchangeName, routingKey!!, null, message!!.toByteArray())
             } catch (e: Exception) {
                 Log.e(LOG_TAG, e.message)
             }
