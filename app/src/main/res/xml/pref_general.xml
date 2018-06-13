@@ -43,7 +43,7 @@
         android:singleLine="true"
         android:title="Rabbitmq port" />
     <EditTextPreference
-        android:defaultValue="foo"
+        android:defaultValue=""
         android:inputType="text"
         android:key="exchange_name"
         android:maxLines="1"
@@ -61,10 +61,26 @@
     <EditTextPreference
         android:defaultValue=""
         android:inputType="text"
-        android:key="routing_key"
+        android:key="broadcast_exchange_name"
         android:maxLines="1"
         android:selectAllOnFocus="true"
         android:singleLine="true"
-        android:title="Routing Key" />
+        android:title="Broadcast Exchange Name" />
+    <EditTextPreference
+        android:defaultValue=""
+        android:inputType="text"
+        android:key="anycast_exchange_name"
+        android:maxLines="1"
+        android:selectAllOnFocus="true"
+        android:singleLine="true"
+        android:title="Anycast Exchange Name" />
+    <EditTextPreference
+        android:defaultValue="bar"
+        android:inputType="text"
+        android:key="anycast_queue_name"
+        android:maxLines="1"
+        android:selectAllOnFocus="true"
+        android:singleLine="true"
+        android:title="Anycast Queue Name" />
 
 </PreferenceScreen>

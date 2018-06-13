@@ -86,7 +86,9 @@ class SettingsActivity : AppCompatPreferenceActivity() {
             bindPreferenceSummaryToValue(findPreference("rabbitmq_port"))
             bindPreferenceSummaryToValue(findPreference("exchange_name"))
             bindPreferenceSummaryToValue(findPreference("queue_name"))
-            bindPreferenceSummaryToValue(findPreference("routing_key"))
+            bindPreferenceSummaryToValue(findPreference("broadcast_exchange_name"))
+            bindPreferenceSummaryToValue(findPreference("anycast_exchange_name"))
+            bindPreferenceSummaryToValue(findPreference("anycast_queue_name"))
         }
 
         override fun onOptionsItemSelected(item: MenuItem): Boolean {

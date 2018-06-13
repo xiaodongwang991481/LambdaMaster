@@ -3,7 +3,6 @@ package com.example.xiaodongwang.lambdamaster
 import android.Manifest
 import android.app.AlertDialog
 import android.app.Notification
-import android.content.Intent
 import android.support.v7.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
@@ -12,16 +11,16 @@ import android.widget.AdapterView
 import com.example.xiaodong.lambdamaster.DBOpenHelper
 import kotlinx.android.synthetic.main.activity_main.*
 import java.util.*
-import android.content.ComponentName
 import android.os.IBinder
-import android.content.ServiceConnection
 import android.widget.Toast
-import android.content.DialogInterface
 import android.app.PendingIntent
-
-
-
-
+import android.content.*
+import android.preference.PreferenceManager
+import android.widget.ViewAnimator
+import com.google.gson.Gson
+import com.rabbitmq.client.Channel
+import com.rabbitmq.client.Connection
+import com.rabbitmq.client.ConnectionFactory
 
 
 class MainActivity : AppCompatActivity() {
@@ -117,6 +116,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    inner class SendMessageByRabbitMQ : View.OnClickListener {
+        override fun onClick(v: View?) {
+            this@MainActivity.onButtonClickSendMessageByRabbitMQ()
+        }
+    }
+
     inner class Settings : View.OnClickListener {
         override fun onClick(v: View?) {
             this@MainActivity.onButtonClickSettings()
@@ -146,6 +151,7 @@ class MainActivity : AppCompatActivity() {
     private var lambdasAdapter: LambdaAdapter? = null
     private var iEvent: IEvent? = null
     private var eventConnection = EventConnection()
+    private var sharedPrefs: SharedPreferences? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         requestPermissions()
@@ -160,6 +166,7 @@ class MainActivity : AppCompatActivity() {
         lambdasAdapter = LambdaAdapter(
                 this, lambdaList!!
         )
+        sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
         var header = layoutInflater.inflate(R.layout.lambda_header, lambdas, false)
         lambdas.addHeaderView(header)
         var footer = layoutInflater.inflate(R.layout.listview_footer, lambdas, false)
@@ -173,6 +180,7 @@ class MainActivity : AppCompatActivity() {
         action_name.setOnClickListener(SelectLambda())
         send_message.setOnClickListener(SendMessage())
         settings.setOnClickListener(Settings())
+        send_message_by_rabbitmq.setOnClickListener(SendMessageByRabbitMQ())
     }
 
     override fun onSaveInstanceState(outState: Bundle?) {
@@ -295,7 +303,61 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
+    fun checkReadyToSendMessage(): Boolean {
+        if (action_name == null || action_name.text.isNullOrBlank()) {
+            Log.e(LOG_TAG, "action name is empty")
+            Toast.makeText(
+                    this, "action name is empty", Toast.LENGTH_SHORT
+            ).show()
+            return false
+        }
+        if (payload == null || payload.text.isNullOrBlank()) {
+            Log.e(LOG_TAG, "payload is empty")
+            Toast.makeText(
+                    this, "payload is empty", Toast.LENGTH_SHORT
+            )
+            return false
+        }
+        if (lambdaList == null) {
+            Log.e(LOG_TAG, "empty lambda list")
+            Toast.makeText(
+                    this, "empty lambda list", Toast.LENGTH_SHORT
+            ).show()
+            return false
+        }
+        return true
+    }
+
+    fun onButtonClickSendMessageByRabbitMQ() {
+        if (!checkReadyToSendMessage()) {
+            Log.e(LOG_TAG, "not ready to send message")
+            return
+        }
+        var actionName = action_name.text.toString()
+        var payLoad = payload.text.toString()
+        var event = RabbitMQMessage(actionName = actionName, properties = payLoad)
+        var gson = Gson()
+        var message = gson.toJson(RabbitMQMessage::class.java)
+        var factory = ConnectionFactory()
+        factory.host = sharedPrefs!!.getString("rabbitmq_host", "localhost")
+        factory.port = sharedPrefs!!.getString("rabbitmq_port", "5672").toInt()
+        factory.virtualHost = sharedPrefs!!.getString("rabbitmq_virtualhost", "/")
+        factory.username = sharedPrefs!!.getString("rabbitmq_username", "guest")
+        factory.password = sharedPrefs!!.getString("rabbitmq_password", "guest")
+        var anycastQueueName = sharedPrefs!!.getString("anycast_queue_name", "")
+        factory.setAutomaticRecoveryEnabled(true)
+        var connection = factory.newConnection()
+        var channel = connection.createChannel()
+        channel.basicPublish("", anycastQueueName, null, message.toByteArray())
+        channel.close()
+        connection.close()
+    }
+
     fun onButtonClickSendMessage() {
+        if (!checkReadyToSendMessage()) {
+            Log.e(LOG_TAG, "not ready to send message")
+            return
+        }
         if (iEvent == null) {
             Log.e(LOG_TAG, "bind interface is not ready")
             Toast.makeText(
@@ -303,21 +365,9 @@ class MainActivity : AppCompatActivity() {
             ).show()
             return
         }
-        if (action_name == null || action_name.text.isNullOrBlank()) {
-            Log.e(LOG_TAG, "action name is empty")
-            Toast.makeText(
-                    this, "action name is mepty", Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
+        var uuid = UUID.randomUUID().toString()
         var actionName = action_name.text.toString()
-        if (lambdaList == null) {
-            Log.e(LOG_TAG, "empty lambda list")
-            Toast.makeText(
-                    this, "empty lambda list", Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
+        var payLoad = payload.text.toString()
         var lambdaFound: Lambda? = null
         for (lambdaHook in lambdaList!!) {
             if (lambdaHook.name == actionName) {
@@ -332,11 +382,6 @@ class MainActivity : AppCompatActivity() {
             ).show()
             return
         }
-        var payLoad = ""
-        if (payload != null && !payload.text.isNullOrBlank()) {
-            payLoad = payload.text.toString()
-        }
-        var uuid = UUID.randomUUID().toString()
         var event = Event(uuid, lambdaFound, payLoad)
         iEvent!!.sendMessage(event)
     }

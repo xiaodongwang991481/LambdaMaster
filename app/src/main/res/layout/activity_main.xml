@@ -73,6 +73,11 @@
             android:layout_height="wrap_content"
             android:text="Send Message" />
         <Button
+            android:id="@+id/send_message_by_rabbitmq"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Send Message by RabbitMQ" />
+        <Button
             android:id="@+id/settings"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
