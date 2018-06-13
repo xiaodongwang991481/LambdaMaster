@@ -21,6 +21,7 @@ import com.google.gson.Gson
 import com.rabbitmq.client.Channel
 import com.rabbitmq.client.Connection
 import com.rabbitmq.client.ConnectionFactory
+import kotlin.concurrent.thread
 
 
 class MainActivity : AppCompatActivity() {
@@ -152,6 +153,7 @@ class MainActivity : AppCompatActivity() {
     private var iEvent: IEvent? = null
     private var eventConnection = EventConnection()
     private var sharedPrefs: SharedPreferences? = null
+    @Volatile private var amqpThreadRunning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         requestPermissions()
@@ -161,12 +163,12 @@ class MainActivity : AppCompatActivity() {
         stop_service.setOnClickListener(StopService())
         bind_service.setOnClickListener(BindService())
         unbind_service.setOnClickListener(UnbindService())
+        sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
         dbHelper = DBOpenHelper(applicationContext, "my.db", null, 1)
         lambdaList = getInitialLambdaList()
         lambdasAdapter = LambdaAdapter(
                 this, lambdaList!!
         )
-        sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
         var header = layoutInflater.inflate(R.layout.lambda_header, lambdas, false)
         lambdas.addHeaderView(header)
         var footer = layoutInflater.inflate(R.layout.listview_footer, lambdas, false)
@@ -333,24 +335,66 @@ class MainActivity : AppCompatActivity() {
             Log.e(LOG_TAG, "not ready to send message")
             return
         }
+        if (rabbitmq_routing_key == null || rabbitmq_routing_key.text.isNullOrBlank()) {
+            Log.e(LOG_TAG, "rabbitmq routing key is empty")
+            Toast.makeText(
+                    this, "rabbitmq routing key is empty", Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        var routingKey = rabbitmq_routing_key.text.toString()
+        var exchangeName = ""
+        if (rabbitmq_exchange_name != null && !rabbitmq_exchange_name.text.isNullOrBlank()) {
+            exchangeName = rabbitmq_exchange_name.text.toString()
+        }
+        Log.i(LOG_TAG, "routingKey=$routingKey")
+        Log.i(LOG_TAG, "exchangeName=$exchangeName")
         var actionName = action_name.text.toString()
         var payLoad = payload.text.toString()
         var event = RabbitMQMessage(actionName = actionName, properties = payLoad)
         var gson = Gson()
-        var message = gson.toJson(RabbitMQMessage::class.java)
-        var factory = ConnectionFactory()
-        factory.host = sharedPrefs!!.getString("rabbitmq_host", "localhost")
-        factory.port = sharedPrefs!!.getString("rabbitmq_port", "5672").toInt()
-        factory.virtualHost = sharedPrefs!!.getString("rabbitmq_virtualhost", "/")
-        factory.username = sharedPrefs!!.getString("rabbitmq_username", "guest")
-        factory.password = sharedPrefs!!.getString("rabbitmq_password", "guest")
-        var anycastQueueName = sharedPrefs!!.getString("anycast_queue_name", "")
-        factory.setAutomaticRecoveryEnabled(true)
-        var connection = factory.newConnection()
-        var channel = connection.createChannel()
-        channel.basicPublish("", anycastQueueName, null, message.toByteArray())
-        channel.close()
-        connection.close()
+        var message = gson.toJson(event)
+        var host = sharedPrefs!!.getString("rabbitmq_host", "localhost")
+        var port = sharedPrefs!!.getString("rabbitmq_port", "5672")
+        var virtualHost = sharedPrefs!!.getString("rabbitmq_virtualhost", "/")
+        var username = sharedPrefs!!.getString("rabbitmq_username", "guest")
+        var password = sharedPrefs!!.getString("rabbitmq_password", "guest")
+        if (amqpThreadRunning) {
+            Log.e(LOG_TAG, "amqp thread is running")
+            Toast.makeText(
+                    this, "amqp thread is running", Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        amqpThreadRunning = true
+        thread(start=true) {
+            var factory = ConnectionFactory()
+            factory.host = host
+            if (!port.isNullOrBlank()) {
+                factory.port = port.toInt()
+            }
+            if (!virtualHost.isNullOrBlank()) {
+                factory.virtualHost = virtualHost
+            }
+            if (!username.isNullOrBlank()) {
+                factory.username = username
+            }
+            if (!password.isNullOrBlank()) {
+                factory.password = password
+            }
+            factory.setAutomaticRecoveryEnabled(true)
+            try {
+                var connection = factory.newConnection()
+                var channel = connection.createChannel()
+                if (!exchangeName.isNullOrBlank()) {
+                    channel.exchangeDeclare(exchangeName, "topic")
+                }
+                channel.basicPublish(exchangeName, routingKey, null, message.toByteArray())
+            } catch (e: Exception) {
+                Log.e(LOG_TAG, e.message)
+            }
+            amqpThreadRunning = false
+        }
     }
 
     fun onButtonClickSendMessage() {

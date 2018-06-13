@@ -72,6 +72,18 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Send Message" />
+        <EditText
+            android:id="@+id/rabbitmq_exchange_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Exchange Name"
+            android:ems="10" />
+        <EditText
+            android:id="@+id/rabbitmq_routing_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Routing Key"
+            android:ems="10" />
         <Button
             android:id="@+id/send_message_by_rabbitmq"
             android:layout_width="match_parent"

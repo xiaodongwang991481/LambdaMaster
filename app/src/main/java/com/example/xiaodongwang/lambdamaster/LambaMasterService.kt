@@ -18,6 +18,7 @@ import com.example.xiaodong.lambdamaster.DBOpenHelper
 import com.google.gson.Gson
 import com.rabbitmq.client.*
 import java.util.*
+import kotlin.concurrent.thread
 
 
 class LambaMasterService : Service() {
@@ -25,50 +26,55 @@ class LambaMasterService : Service() {
     private var dbHelper: DBOpenHelper? = null
     private var lambdaList: ArrayList<Lambda>? = null
     private var sharedPrefs: SharedPreferences? = null
-    private var routingKeyExecuteHandlers: MutableMap<String, RoutingKeyHandler>? = null
-    private var routingKeyBinaryHandlers: MutableMap<String, RoutingKeyHandler>? = null
-    private var defaultRoutingKeyExecuteHandler: RoutingKeyHandler? = null
-    private var defaultRoutingKeyBinaryHandler: RoutingKeyHandler? = null
-    private var connection: Connection? = null
-    private var channel: Channel? = null
+    @Volatile var amqpThreadRunning = false
+    private var amqpLock = Object()
 
-    inner class LambdaExecuteConsumer(val chan: Channel) : DefaultConsumer(chan) {
+    inner class LambdaExecuteConsumer(
+            val chan: Channel,
+            val routingKeyExecuteHandlers: MutableMap<String, RoutingKeyHandler>,
+            val defaultRoutingKeyExecuteHandler: RoutingKeyHandler) : DefaultConsumer(chan) {
         override fun handleDelivery(
                 consumerTag: String?, envelope: Envelope,
                 properties: AMQP.BasicProperties?, body: ByteArray
         ) {
             val routingKey = envelope.routingKey
-            if (routingKeyExecuteHandlers!!.containsKey(routingKey)) {
-                routingKeyExecuteHandlers!![routingKey]!!.handleDelivery(
+            if (routingKeyExecuteHandlers.containsKey(routingKey)) {
+                routingKeyExecuteHandlers[routingKey]!!.handleDelivery(
                         consumerTag, envelope, properties, body
                 )
             } else {
-                defaultRoutingKeyExecuteHandler!!.handleDelivery(
+                defaultRoutingKeyExecuteHandler.handleDelivery(
                         consumerTag, envelope, properties, body
                 )
             }
         }
     }
 
-    inner class LambdaBinaryConsumer(val chan: Channel) : DefaultConsumer(chan) {
+    inner class LambdaBinaryConsumer(
+            val chan: Channel,
+            val routingKeyBinaryHandlers: MutableMap<String, RoutingKeyHandler>,
+            val defaultRoutingKeyBinaryHandler: RoutingKeyHandler
+    ) : DefaultConsumer(chan) {
         override fun handleDelivery(
                 consumerTag: String?, envelope: Envelope,
                 properties: AMQP.BasicProperties?, body: ByteArray
         ) {
             val routingKey = envelope.routingKey
-            if (routingKeyBinaryHandlers!!.containsKey(routingKey)) {
-                routingKeyBinaryHandlers!![routingKey]!!.handleDelivery(
+            if (routingKeyBinaryHandlers.containsKey(routingKey)) {
+                routingKeyBinaryHandlers[routingKey]!!.handleDelivery(
                         consumerTag, envelope, properties, body
                 )
             } else {
-                defaultRoutingKeyBinaryHandler!!.handleDelivery(
+                defaultRoutingKeyBinaryHandler.handleDelivery(
                         consumerTag, envelope, properties, body
                 )
             }
         }
     }
 
-    inner class DefaultRoutingKeyExecuteHandler : RoutingKeyHandler {
+    inner class DefaultRoutingKeyExecuteHandler(
+            val routingKeyExecuteHandlers: MutableMap<String, RoutingKeyHandler>
+    ) : RoutingKeyHandler {
         override fun handleDelivery(
                 consumerTag: String?, envelope: Envelope,
                 properties: AMQP.BasicProperties?, body: ByteArray
@@ -80,7 +86,7 @@ class LambaMasterService : Service() {
             val envelopedMessage = gson.fromJson(message, RabbitMQMessage::class.java)
             val lambdaFound = getLambda(envelopedMessage.actionName)
             if (lambdaFound != null) {
-                routingKeyExecuteHandlers!![lambdaFound.name]!!.handleDelivery(
+                routingKeyExecuteHandlers[lambdaFound.name]!!.handleDelivery(
                         consumerTag, envelope, properties, envelopedMessage.properties.toByteArray()
                 )
             } else {
@@ -89,7 +95,9 @@ class LambaMasterService : Service() {
         }
     }
 
-    inner class DefaultRoutingKeyBinaryHandler : RoutingKeyHandler {
+    inner class DefaultRoutingKeyBinaryHandler(
+            val routingKeyBinaryHandlers: MutableMap<String, RoutingKeyHandler>
+    ) : RoutingKeyHandler {
         override fun handleDelivery(
                 consumerTag: String?, envelope: Envelope,
                 properties: AMQP.BasicProperties?, body: ByteArray
@@ -101,7 +109,7 @@ class LambaMasterService : Service() {
             val envelopedMessage = gson.fromJson(message, RabbitMQMessage::class.java)
             val lambdaFound = getLambda(envelopedMessage.actionName)
             if (lambdaFound != null) {
-                routingKeyBinaryHandlers!![lambdaFound.name]!!.handleDelivery(
+                routingKeyBinaryHandlers[lambdaFound.name]!!.handleDelivery(
                         consumerTag, envelope, properties, envelopedMessage.properties.toByteArray()
                 )
             } else {
@@ -154,17 +162,16 @@ class LambaMasterService : Service() {
     }
 
     @Synchronized private fun startAMQP() {
-        var factory = ConnectionFactory()
-        factory.host = sharedPrefs!!.getString("rabbitmq_host", "localhost")
-        Log.i(LOG_TAG, "rabbitmq host=${factory.host}")
-        factory.port = sharedPrefs!!.getString("rabbitmq_port", "5672").toInt()
-        Log.i(LOG_TAG, "rabbitmq port=${factory.port}")
-        factory.virtualHost = sharedPrefs!!.getString("rabbitmq_virtualhost", "/")
-        Log.i(LOG_TAG, "rabbitmq virtualhost=${factory.virtualHost}")
-        factory.username = sharedPrefs!!.getString("rabbitmq_username", "guest")
-        Log.i(LOG_TAG, "rabbitmq username=${factory.username}")
-        factory.password = sharedPrefs!!.getString("rabbitmq_password", "guest")
-        Log.i(LOG_TAG, "rabbitmq password=${factory.password}")
+        var host = sharedPrefs!!.getString("rabbitmq_host", "localhost")
+        Log.i(LOG_TAG, "rabbitmq host=$host")
+        var port = sharedPrefs!!.getString("rabbitmq_port", "5672")
+        Log.i(LOG_TAG, "rabbitmq port=port")
+        var virtualHost = sharedPrefs!!.getString("rabbitmq_virtualhost", "/")
+        Log.i(LOG_TAG, "rabbitmq virtualhost=$virtualHost")
+        var username = sharedPrefs!!.getString("rabbitmq_username", "guest")
+        Log.i(LOG_TAG, "rabbitmq username=$username")
+        var password = sharedPrefs!!.getString("rabbitmq_password", "guest")
+        Log.i(LOG_TAG, "rabbitmq password=$password")
         var exchangeName = sharedPrefs!!.getString("exchange_name", "")
         var queueName = sharedPrefs!!.getString("queue_name", "")
         var broadcastExchangeName = sharedPrefs!!.getString("broadcast_exchange_name", "")
@@ -175,58 +182,102 @@ class LambaMasterService : Service() {
         Log.i(LOG_TAG, "broadcast exchange name=$broadcastExchangeName")
         Log.i(LOG_TAG, "anycast exchange name=$anycastExchangeName")
         Log.i(LOG_TAG, "anycast queue name=$anycastQueueName")
-        // factory.setAutomaticRecoveryEnabled(true)
-        connection = factory.newConnection()
-        channel = connection!!.createChannel()
-        channel!!.queueDeclare(queueName, false, false, false, null)
-        if (!exchangeName.isNullOrBlank()) {
-            channel!!.exchangeDeclare(exchangeName, "topic")
-        }
-        channel!!.queueDeclare(anycastQueueName, false, false, false, null)
-        if (!anycastExchangeName.isNullOrBlank()) {
-            channel!!.exchangeDeclare(anycastExchangeName, "topic")
-        }
-        if(!broadcastExchangeName.isNullOrBlank()) {
-            channel!!.exchangeDeclare(broadcastExchangeName, "fanout")
-            channel!!.queueBind(queueName, broadcastExchangeName, "")
-        }
-        defaultRoutingKeyBinaryHandler = DefaultRoutingKeyBinaryHandler()
-        defaultRoutingKeyExecuteHandler=DefaultRoutingKeyExecuteHandler()
-        routingKeyExecuteHandlers = mutableMapOf<String, RoutingKeyHandler>()
-        routingKeyBinaryHandlers = mutableMapOf<String, RoutingKeyHandler>()
-        lambdaList?.let {
-            for (item in it) {
-                if (!exchangeName.isNullOrBlank()) {
-                    channel!!.queueBind(queueName, exchangeName, item.name)
+        amqpThreadRunning = true
+        thread(start=true) {
+            var factory = ConnectionFactory()
+            factory.host = host
+            if (!port.isNullOrBlank()) {
+                factory.port = port.toInt()
+            }
+            if (!virtualHost.isNullOrBlank()) {
+                factory.virtualHost = virtualHost
+            }
+            if (!username.isNullOrBlank()) {
+                factory.username = username
+            }
+            if (!password.isNullOrBlank()) {
+                factory.password = password
+            }
+            factory.setAutomaticRecoveryEnabled(true)
+            Log.i(LOG_TAG, "start ampq thread")
+            while (amqpThreadRunning) {
+                try {
+                    var connection = factory.newConnection()
+                    var channel = connection!!.createChannel()
+                    Log.i(LOG_TAG, "ampq connection is created")
+                    channel.queueDeclare(queueName, false, false, false, null)
+                    if (!exchangeName.isNullOrBlank()) {
+                        channel.exchangeDeclare(exchangeName, "topic")
+                    }
+                    channel.queueDeclare(anycastQueueName, false, false, false, null)
+                    if (!anycastExchangeName.isNullOrBlank()) {
+                        channel.exchangeDeclare(anycastExchangeName, "topic")
+                    }
+                    if (!broadcastExchangeName.isNullOrBlank()) {
+                        channel.exchangeDeclare(broadcastExchangeName, "fanout")
+                        channel.queueBind(queueName, broadcastExchangeName, "")
+                        Log.i(LOG_TAG, "bind queue $queueName to exchange $broadcastExchangeName")
+                    }
+                    var routingKeyExecuteHandlers = mutableMapOf<String, RoutingKeyHandler>()
+                    var routingKeyBinaryHandlers = mutableMapOf<String, RoutingKeyHandler>()
+                    lambdaList?.let {
+                        for (item in it) {
+                            if (!exchangeName.isNullOrBlank()) {
+                                channel.queueBind(queueName, exchangeName, item.name)
+                                Log.i(
+                                        LOG_TAG,
+                                        "bind queue $queueName with " +
+                                        "exchange $exchangeName by routing key ${item.name}"
+                                )
+                            }
+                            routingKeyBinaryHandlers[item.name] = getRoutingKeyBinaryHandler(
+                                    item
+                            )
+                            if (!anycastExchangeName.isNullOrBlank()) {
+                                channel.queueBind(anycastQueueName, anycastExchangeName, item.name)
+                                Log.i(
+                                        LOG_TAG,
+                                        "bind queue $anycastQueueName with exchange $anycastExchangeName " +
+                                        "by routing key ${item.name}"
+                                )
+                            }
+                            routingKeyExecuteHandlers[item.name] = getRoutingKeyExecuteHandler(
+                                    item
+                            )
+                        }
+                    }
+                    var defaultRoutingKeyBinaryHandler = DefaultRoutingKeyBinaryHandler(routingKeyBinaryHandlers)
+                    var defaultRoutingKeyExecuteHandler = DefaultRoutingKeyExecuteHandler(routingKeyExecuteHandlers)
+                    channel.basicConsume(
+                            queueName, true,
+                            LambdaBinaryConsumer(channel, routingKeyBinaryHandlers, defaultRoutingKeyBinaryHandler)
+                    )
+                    channel.basicConsume(
+                            anycastQueueName, true,
+                            LambdaExecuteConsumer(channel, routingKeyExecuteHandlers, defaultRoutingKeyExecuteHandler)
+                    )
+                } catch (e: Exception) {
+                    Log.e(LOG_TAG, e.message)
+                    Thread.sleep(1000)
                 }
-                routingKeyBinaryHandlers!![item.name] = getRoutingKeyBinaryHandler(
-                        item
-                )
-                if (!anycastExchangeName.isNullOrBlank()) {
-                    channel!!.queueBind(anycastQueueName, anycastExchangeName, item.name)
-                }
-                routingKeyExecuteHandlers!![item.name] = getRoutingKeyExecuteHandler(
-                        item
-                )
+            }
+            Log.i(LOG_TAG, "amqp thread is finished")
+            synchronized(amqpLock) {
+                amqpLock.notifyAll()
             }
         }
-        channel!!.basicConsume(queueName, true, LambdaBinaryConsumer(channel!!))
-        channel!!.basicConsume(anycastQueueName, true, LambdaExecuteConsumer(channel!!))
     }
 
     @Synchronized private fun stopAMQP() {
-        channel?.let {
-            it.close()
+        synchronized(amqpLock) {
+            if (amqpThreadRunning) {
+                amqpThreadRunning = false
+                Log.i(LOG_TAG, "stop amqp thread")
+                amqpLock.wait()
+            } else {
+                Log.i(LOG_TAG, "amqp thread is already stopped")
+            }
         }
-        channel = null
-        connection?.let {
-            it.close()
-        }
-        connection = null
-        routingKeyBinaryHandlers = null
-        routingKeyExecuteHandlers = null
-        defaultRoutingKeyExecuteHandler = null
-        defaultRoutingKeyBinaryHandler = null
     }
 
     private fun startInForeground() {
@@ -315,20 +366,32 @@ class LambaMasterService : Service() {
         return eventBinder
     }
 
-    override fun onCreate() {
-        Log.i(LOG_TAG, "create service")
-        super.onCreate()
+    @Synchronized fun startEventHandler() {
         if (handlerThread == null) {
             handlerThread = EventHandlerThread("EventHandler")
             handlerThread!!.start()
         } else {
             Log.i(LOG_TAG, "handler thread is already started")
         }
+    }
+
+    @Synchronized fun stopEventHandler() {
+        if (handlerThread != null) {
+            handlerThread!!.quit()
+        }
+        handlerThread = null
+        eventHandler = null
+    }
+
+    override fun onCreate() {
+        Log.i(LOG_TAG, "create service")
+        super.onCreate()
+        createNotificationChannel()
+        startInForeground()
         dbHelper = DBOpenHelper(applicationContext, "my.db", null, 1)
         lambdaList = getInitialLambdaList()
         sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this)
-        createNotificationChannel()
-        startInForeground()
+        startEventHandler()
         startAMQP()
     }
 
@@ -338,12 +401,8 @@ class LambaMasterService : Service() {
 
     override fun onDestroy() {
         Log.i(LOG_TAG, "destroy service")
-        if (handlerThread != null) {
-            handlerThread!!.quit()
-            handlerThread = null
-            eventHandler = null
-        }
         stopAMQP()
+        stopEventHandler()
         stopForeground(true)
         super.onDestroy()
     }
