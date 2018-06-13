@@ -1,8 +1,7 @@
 package com.example.xiaodongwang.lambdamaster
 
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
+import android.content.*
+import android.os.IBinder
 import android.util.Log
 import android.widget.Toast
 
@@ -13,6 +12,7 @@ class LambaResultReceiver : BroadcastReceiver() {
         var data = intent.extras
         val name = data.getString("name")
         val payload = data.getString("payload")
+        LambaMasterService.handleEventCallback(name, payload)
         Log.i(
                 LOG_TAG,
                 "receive lamba result $name=$payload"

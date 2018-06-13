@@ -18,18 +18,58 @@ import com.example.xiaodong.lambdamaster.DBOpenHelper
 import com.google.gson.Gson
 import com.rabbitmq.client.*
 import java.util.*
+import java.util.concurrent.BlockingQueue
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentMap
+import java.util.concurrent.LinkedBlockingDeque
 import kotlin.concurrent.thread
+import com.rabbitmq.client.AMQP
+
+
 
 
 class LambaMasterService : Service() {
+
+    inner class AmqpEventCallbackInQueue {
+        val replyTo: String
+        val name: String
+        val payload: String
+
+        constructor(replyTo: String, name: String, payload: String) {
+            this.replyTo = replyTo
+            this.name = name
+            this.payload = payload
+        }
+
+        fun callback(channel: Channel) {
+            val replyProps = AMQP.BasicProperties.Builder()
+                    .correlationId(name)
+                    .build()
+            channel.basicPublish("", replyTo, replyProps, payload.toByteArray())
+        }
+    }
+
+    inner class AmqpEventCallback: EventCallback {
+        val replyTo: String
+
+        constructor(replyTo: String) {
+            this.replyTo = replyTo
+        }
+
+        override fun callback(name: String, payload: String) {
+            amqpEventQueue.putLast(AmqpEventCallbackInQueue(replyTo, name, payload))
+        }
+    }
+
+
 
     private var dbHelper: DBOpenHelper? = null
     private var lambdaList: ArrayList<Lambda>? = null
     private var sharedPrefs: SharedPreferences? = null
     @Volatile var amqpThreadRunning = false
     private var amqpRunningLock = Object()
-    @Volatile var amqpThreadNotified = false
-    private var amqpWaitingLock = Object()
+    private var amqpThread: Thread? = null
+    private var amqpEventQueue = LinkedBlockingDeque<AmqpEventCallbackInQueue>()
 
     inner class LambdaExecuteConsumer(
             val chan: Channel,
@@ -42,11 +82,11 @@ class LambaMasterService : Service() {
             val routingKey = envelope.routingKey
             if (routingKeyExecuteHandlers.containsKey(routingKey)) {
                 routingKeyExecuteHandlers[routingKey]!!.handleDelivery(
-                        consumerTag, envelope, properties, body
+                        channel, consumerTag, envelope, properties, body
                 )
             } else {
                 defaultRoutingKeyExecuteHandler.handleDelivery(
-                        consumerTag, envelope, properties, body
+                        channel, consumerTag, envelope, properties, body
                 )
             }
         }
@@ -64,11 +104,11 @@ class LambaMasterService : Service() {
             val routingKey = envelope.routingKey
             if (routingKeyBinaryHandlers.containsKey(routingKey)) {
                 routingKeyBinaryHandlers[routingKey]!!.handleDelivery(
-                        consumerTag, envelope, properties, body
+                        channel, consumerTag, envelope, properties, body
                 )
             } else {
                 defaultRoutingKeyBinaryHandler.handleDelivery(
-                        consumerTag, envelope, properties, body
+                        channel, consumerTag, envelope, properties, body
                 )
             }
         }
@@ -78,7 +118,7 @@ class LambaMasterService : Service() {
             val routingKeyExecuteHandlers: MutableMap<String, RoutingKeyHandler>
     ) : RoutingKeyHandler {
         override fun handleDelivery(
-                consumerTag: String?, envelope: Envelope,
+                channel: Channel, consumerTag: String?, envelope: Envelope,
                 properties: AMQP.BasicProperties?, body: ByteArray
         ) {
             var message = String(body)
@@ -89,10 +129,12 @@ class LambaMasterService : Service() {
             val lambdaFound = getLambda(envelopedMessage.actionName)
             if (lambdaFound != null) {
                 routingKeyExecuteHandlers[lambdaFound.name]!!.handleDelivery(
-                        consumerTag, envelope, properties, envelopedMessage.properties.toByteArray()
+                        channel, consumerTag, envelope, properties,
+                        envelopedMessage.properties.toByteArray()
                 )
             } else {
                 Log.e(LOG_TAG, "failed to get lambda from ${envelopedMessage.actionName}")
+                channel.basicAck(envelope.deliveryTag, false)
             }
         }
     }
@@ -101,7 +143,7 @@ class LambaMasterService : Service() {
             val routingKeyBinaryHandlers: MutableMap<String, RoutingKeyHandler>
     ) : RoutingKeyHandler {
         override fun handleDelivery(
-                consumerTag: String?, envelope: Envelope,
+                channel: Channel, consumerTag: String?, envelope: Envelope,
                 properties: AMQP.BasicProperties?, body: ByteArray
         ) {
             var message = String(body)
@@ -112,7 +154,8 @@ class LambaMasterService : Service() {
             val lambdaFound = getLambda(envelopedMessage.actionName)
             if (lambdaFound != null) {
                 routingKeyBinaryHandlers[lambdaFound.name]!!.handleDelivery(
-                        consumerTag, envelope, properties, envelopedMessage.properties.toByteArray()
+                        channel, consumerTag, envelope, properties,
+                        envelopedMessage.properties.toByteArray()
                 )
             } else {
                 Log.e(LOG_TAG, "failed to get lambda from ${envelopedMessage.actionName}")
@@ -124,7 +167,7 @@ class LambaMasterService : Service() {
             val lambdaHook: Lambda
     ) : RoutingKeyHandler {
         override fun handleDelivery(
-                consumerTag: String?, envelope: Envelope,
+                channel: Channel, consumerTag: String?, envelope: Envelope,
                 properties: AMQP.BasicProperties?, body: ByteArray
         ) {
             var message = String(body)
@@ -136,19 +179,31 @@ class LambaMasterService : Service() {
             val lambdaHook: Lambda
     ) : RoutingKeyHandler {
         override fun handleDelivery(
-                consumerTag: String?, envelope: Envelope,
+                channel: Channel, consumerTag: String?, envelope: Envelope,
                 properties: AMQP.BasicProperties?, body: ByteArray
         ) {
             var message = String(body)
             var deliverTag = envelope.deliveryTag.toString()
             Log.i(LOG_TAG, "receive message $message with deliverTag=$deliverTag")
-            var event = Event(UUID.randomUUID().toString(), lambdaHook, message)
+            var correlationId = properties?.correlationId
+            var replyTo = properties?.replyTo
+            var eventId = correlationId
+            if (eventId.isNullOrBlank()) {
+                eventId = UUID.randomUUID().toString()
+            }
+            var event = Event(eventId!!, lambdaHook, message)
             Log.i(LOG_TAG, "receive event $event")
             if (eventHandler != null) {
                 Log.i(LOG_TAG, "send event $event to event handler")
                 var msg = Message.obtain()
                 msg.obj = event
+                if (!correlationId.isNullOrBlank() && !replyTo.isNullOrBlank()) {
+                    synchronized(eventCallbacks) {
+                        eventCallbacks[correlationId!!] = AmqpEventCallback(replyTo!!)
+                    }
+                }
                 eventHandler!!.sendMessage(msg)
+                channel.basicAck(envelope.deliveryTag, false)
             } else {
                 Log.e(LOG_TAG, "event handler is not ready yet")
             }
@@ -184,7 +239,7 @@ class LambaMasterService : Service() {
         Log.i(LOG_TAG, "broadcast exchange name=$broadcastExchangeName")
         Log.i(LOG_TAG, "anycast exchange name=$anycastExchangeName")
         Log.i(LOG_TAG, "anycast queue name=$anycastQueueName")
-        thread(start=true) {
+        amqpThread = thread(start=true) {
             amqpThreadRunning = true
             var factory = ConnectionFactory()
             factory.host = host
@@ -206,6 +261,7 @@ class LambaMasterService : Service() {
                 try {
                     var connection = factory.newConnection()
                     var channel = connection!!.createChannel()
+                    channel.basicQos(1)
                     Log.i(LOG_TAG, "ampq connection is created")
                     channel.queueDeclare(queueName, false, false, false, null)
                     if (!exchangeName.isNullOrBlank()) {
@@ -255,16 +311,23 @@ class LambaMasterService : Service() {
                             LambdaBinaryConsumer(channel, routingKeyBinaryHandlers, defaultRoutingKeyBinaryHandler)
                     )
                     channel.basicConsume(
-                            anycastQueueName, true,
+                            anycastQueueName, false,
                             LambdaExecuteConsumer(channel, routingKeyExecuteHandlers, defaultRoutingKeyExecuteHandler)
                     )
-                    synchronized(amqpWaitingLock) {
-                        while (!amqpThreadNotified) {
-                            Log.i(LOG_TAG, "amqp thread wait for finish signal")
-                            amqpWaitingLock.wait()
+                    while (true) {
+                        try {
+                            var amqpCallback = amqpEventQueue.takeFirst()
+                            amqpCallback.callback(channel)
+                        } catch (e: InterruptedException) {
+                            Log.e(LOG_TAG, e.message)
+                            break
                         }
-                        Log.i(LOG_TAG, "amqp thread finish signal is received")
                     }
+                    channel.close()
+                    connection.close()
+                    break
+                } catch (e: InterruptedException) {
+                  Log.e(LOG_TAG, e.message)
                     break
                 } catch (e: Exception) {
                     Log.e(LOG_TAG, e.message)
@@ -281,10 +344,8 @@ class LambaMasterService : Service() {
     }
 
     @Synchronized private fun stopAMQP() {
-        synchronized(amqpWaitingLock) {
-            amqpThreadNotified = true
-            Log.i(LOG_TAG, "amqp thread notify send finish signal")
-            amqpWaitingLock.notifyAll()
+        amqpThread?.let {
+            it.interrupt()
         }
         synchronized(amqpRunningLock) {
             while (amqpThreadRunning) {
@@ -293,7 +354,6 @@ class LambaMasterService : Service() {
             }
             Log.i(LOG_TAG, "amqp thread is finished")
         }
-        amqpThreadNotified = false
     }
 
     private fun startInForeground() {
@@ -452,5 +512,15 @@ class LambaMasterService : Service() {
         private val LOG_TAG = "LambaMasterService"
         private val NOTIFICATION_CHANNEL_ID = "lambda_master"
         private val NOTIFICATION_CHANNEL_NAME = "lambda_master"
+        public var eventCallbacks = mutableMapOf<String, EventCallback>()
+        public fun handleEventCallback(name: String, payload: String) {
+            var callback: EventCallback? = null
+            synchronized(eventCallbacks) {
+                callback = eventCallbacks.remove(name)
+            }
+            callback?.let {
+                it.callback(name, payload)
+            }
+        }
     }
 }

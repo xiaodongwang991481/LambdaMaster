@@ -22,6 +22,10 @@ import com.rabbitmq.client.Channel
 import com.rabbitmq.client.Connection
 import com.rabbitmq.client.ConnectionFactory
 import kotlin.concurrent.thread
+import com.rabbitmq.client.AMQP
+import java.util.UUID.randomUUID
+
+
 
 
 class MainActivity : AppCompatActivity() {
@@ -347,6 +351,7 @@ class MainActivity : AppCompatActivity() {
         if (rabbitmq_exchange_name != null && !rabbitmq_exchange_name.text.isNullOrBlank()) {
             exchangeName = rabbitmq_exchange_name.text.toString()
         }
+        var replyQueueName = sharedPrefs!!.getString("reply_queue_name", "")
         Log.i(LOG_TAG, "exchangeName=$exchangeName")
         var actionName = action_name.text.toString()
         var payLoad = payload.text.toString()
@@ -397,7 +402,17 @@ class MainActivity : AppCompatActivity() {
                 if (!exchangeName.isNullOrBlank()) {
                     channel.exchangeDeclare(exchangeName, "topic")
                 }
-                channel.basicPublish(exchangeName, routingKey!!, null, message!!.toByteArray())
+                var props: AMQP.BasicProperties? = null
+                if (!replyQueueName.isNullOrBlank()) {
+                    val corrId = UUID.randomUUID().toString()
+                    props = AMQP.BasicProperties.Builder()
+                            .correlationId(corrId)
+                            .replyTo(replyQueueName)
+                            .build()
+                }
+                channel.basicPublish(exchangeName, routingKey!!, props, message!!.toByteArray())
+                channel.close()
+                connection.close()
             } catch (e: Exception) {
                 Log.e(LOG_TAG, e.message)
             }
