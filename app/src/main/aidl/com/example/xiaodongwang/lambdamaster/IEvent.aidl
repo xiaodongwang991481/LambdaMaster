@@ -7,5 +7,5 @@ import com.example.xiaodongwang.lambdamaster.Event;
 
 interface IEvent {
 
-    void sendMessage(in Event event);
+    void sendMessage(in Event event, in boolean waitReply);
 }

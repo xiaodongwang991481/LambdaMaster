@@ -84,6 +84,12 @@
             android:layout_height="wrap_content"
             android:hint="Routing Key"
             android:ems="10" />
+        <Switch
+            android:id="@+id/wait_message_reply"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Wait Message Reply" />
+
         <Button
             android:id="@+id/send_message_by_rabbitmq"
             android:layout_width="match_parent"

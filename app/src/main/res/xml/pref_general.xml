@@ -82,12 +82,4 @@
         android:selectAllOnFocus="true"
         android:singleLine="true"
         android:title="Anycast Queue Name" />
-    <EditTextPreference
-        android:defaultValue="reply_queue"
-        android:inputType="text"
-        android:key="reply_queue_name"
-        android:maxLines="1"
-        android:selectAllOnFocus="true"
-        android:singleLine="true"
-        android:title="Reply Queue Name" />
 </PreferenceScreen>

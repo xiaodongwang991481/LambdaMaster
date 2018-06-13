@@ -18,14 +18,11 @@ import android.content.*
 import android.preference.PreferenceManager
 import android.widget.ViewAnimator
 import com.google.gson.Gson
-import com.rabbitmq.client.Channel
-import com.rabbitmq.client.Connection
-import com.rabbitmq.client.ConnectionFactory
+import com.rabbitmq.client.*
 import kotlin.concurrent.thread
-import com.rabbitmq.client.AMQP
 import java.util.UUID.randomUUID
-
-
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.LinkedBlockingDeque
 
 
 class MainActivity : AppCompatActivity() {
@@ -158,6 +155,7 @@ class MainActivity : AppCompatActivity() {
     private var eventConnection = EventConnection()
     private var sharedPrefs: SharedPreferences? = null
     @Volatile private var amqpThreadRunning = false
+    @Volatile private var directThreadRunning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         requestPermissions()
@@ -351,7 +349,6 @@ class MainActivity : AppCompatActivity() {
         if (rabbitmq_exchange_name != null && !rabbitmq_exchange_name.text.isNullOrBlank()) {
             exchangeName = rabbitmq_exchange_name.text.toString()
         }
-        var replyQueueName = sharedPrefs!!.getString("reply_queue_name", "")
         Log.i(LOG_TAG, "exchangeName=$exchangeName")
         var actionName = action_name.text.toString()
         var payLoad = payload.text.toString()
@@ -379,6 +376,7 @@ class MainActivity : AppCompatActivity() {
         var virtualHost = sharedPrefs!!.getString("rabbitmq_virtualhost", "/")
         var username = sharedPrefs!!.getString("rabbitmq_username", "guest")
         var password = sharedPrefs!!.getString("rabbitmq_password", "guest")
+        var waitReply = wait_message_reply.isChecked
         thread(start=true) {
             amqpThreadRunning = true
             var factory = ConnectionFactory()
@@ -402,15 +400,45 @@ class MainActivity : AppCompatActivity() {
                 if (!exchangeName.isNullOrBlank()) {
                     channel.exchangeDeclare(exchangeName, "topic")
                 }
+                var replyQueueName: String? = null
+                var corrId: String? = null
                 var props: AMQP.BasicProperties? = null
-                if (!replyQueueName.isNullOrBlank()) {
-                    val corrId = UUID.randomUUID().toString()
+                if (waitReply) {
+                    replyQueueName = channel.queueDeclare().queue
+                    corrId = UUID.randomUUID().toString()
                     props = AMQP.BasicProperties.Builder()
                             .correlationId(corrId)
                             .replyTo(replyQueueName)
                             .build()
                 }
                 channel.basicPublish(exchangeName, routingKey!!, props, message!!.toByteArray())
+                if (!replyQueueName.isNullOrBlank()) {
+                    Log.i(LOG_TAG, "wait for reply in queue $replyQueueName")
+                    val response = ArrayBlockingQueue<String>(1)
+                    channel.basicConsume(replyQueueName, true, object : DefaultConsumer(channel) {
+                        override fun handleDelivery(
+                                consumerTag: String?, envelope: Envelope,
+                                properties: AMQP.BasicProperties?, body: ByteArray
+                        ) {
+                            if (properties != null) {
+                                var correlationId = properties.correlationId
+                                if (!corrId.isNullOrBlank() && correlationId.equals(corrId)) {
+                                    var message = String(body)
+                                    response.put(message)
+                                    Log.i(LOG_TAG, "receive callback with message=$message")
+                                } else {
+                                    Log.e(LOG_TAG, "unknown correlation id=$correlationId")
+                                }
+                            } else {
+                                Log.e(LOG_TAG, "properties is null")
+                            }
+                        }
+                    })
+                    val replyPayload = response.take()
+                    Log.i(LOG_TAG, "receive reply payload=$replyPayload")
+                } else {
+                    Log.i(LOG_TAG, "do not wait for reply")
+                }
                 channel.close()
                 connection.close()
             } catch (e: Exception) {
@@ -421,6 +449,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun onButtonClickSendMessage() {
+        if (directThreadRunning) {
+            Log.e(LOG_TAG, "send thread is running")
+            Toast.makeText(
+                    this, "send thread is running", Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
         if (!checkReadyToSendMessage()) {
             Log.e(LOG_TAG, "not ready to send message")
             return
@@ -449,8 +484,26 @@ class MainActivity : AppCompatActivity() {
             ).show()
             return
         }
-        var event = Event(uuid, lambdaFound, payLoad)
-        iEvent!!.sendMessage(event)
+        val waitReply = wait_message_reply.isChecked
+        thread(start=true) {
+            directThreadRunning = true
+            var event = Event(uuid, lambdaFound, payLoad)
+            iEvent!!.sendMessage(event, waitReply)
+            if (waitReply) {
+                var eventQueue: LinkedBlockingDeque<String>? = null
+                synchronized(LambaMasterService.directEventQueues) {
+                    eventQueue = LambaMasterService.directEventQueues.remove(uuid)
+                }
+                Log.i(LOG_TAG, "wait reply in queue $eventQueue")
+                eventQueue?.let {
+                    val replyPayload = it.take()
+                    Log.i(LOG_TAG, "receive reply $replyPayload for id=$uuid")
+                }
+            } else {
+                Log.i(LOG_TAG, "do not wait for reply")
+            }
+            directThreadRunning = false
+        }
     }
 
     private fun getInitialLambdaList() : ArrayList<Lambda> {

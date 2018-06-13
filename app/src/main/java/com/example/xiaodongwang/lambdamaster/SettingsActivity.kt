@@ -89,7 +89,6 @@ class SettingsActivity : AppCompatPreferenceActivity() {
             bindPreferenceSummaryToValue(findPreference("broadcast_exchange_name"))
             bindPreferenceSummaryToValue(findPreference("anycast_exchange_name"))
             bindPreferenceSummaryToValue(findPreference("anycast_queue_name"))
-            bindPreferenceSummaryToValue(findPreference("reply_queue_name"))
         }
 
         override fun onOptionsItemSelected(item: MenuItem): Boolean {

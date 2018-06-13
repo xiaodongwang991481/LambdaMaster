@@ -42,6 +42,7 @@ class LambaMasterService : Service() {
         }
 
         fun callback(channel: Channel) {
+            Log.i(LOG_TAG, "reply payload $payload with name $name to queue $replyTo")
             val replyProps = AMQP.BasicProperties.Builder()
                     .correlationId(name)
                     .build()
@@ -57,11 +58,23 @@ class LambaMasterService : Service() {
         }
 
         override fun callback(name: String, payload: String) {
+            Log.i(LOG_TAG, "put payload $payload to amqp queue $replyTo")
             amqpEventQueue.putLast(AmqpEventCallbackInQueue(replyTo, name, payload))
         }
     }
 
+    inner class DirectEventCallback: EventCallback {
+        val eventQueue: LinkedBlockingDeque<String>
 
+        constructor(eventQueue: LinkedBlockingDeque<String>) {
+            this.eventQueue = eventQueue
+        }
+
+        override fun callback(name: String, payload: String) {
+            Log.i(LOG_TAG, "put payload $payload to queue $eventQueue")
+            eventQueue.putLast(payload)
+        }
+    }
 
     private var dbHelper: DBOpenHelper? = null
     private var lambdaList: ArrayList<Lambda>? = null
@@ -198,6 +211,7 @@ class LambaMasterService : Service() {
                 var msg = Message.obtain()
                 msg.obj = event
                 if (!correlationId.isNullOrBlank() && !replyTo.isNullOrBlank()) {
+                    Log.i(LOG_TAG, "add event callback $event")
                     synchronized(eventCallbacks) {
                         eventCallbacks[correlationId!!] = AmqpEventCallback(replyTo!!)
                     }
@@ -314,20 +328,23 @@ class LambaMasterService : Service() {
                             anycastQueueName, false,
                             LambdaExecuteConsumer(channel, routingKeyExecuteHandlers, defaultRoutingKeyExecuteHandler)
                     )
+                    Log.i(LOG_TAG, "wait for callbacks")
                     while (true) {
                         try {
                             var amqpCallback = amqpEventQueue.takeFirst()
+                            Log.i(LOG_TAG, "receive callback $amqpCallback")
                             amqpCallback.callback(channel)
                         } catch (e: InterruptedException) {
                             Log.e(LOG_TAG, e.message)
                             break
                         }
                     }
+                    Log.i(LOG_TAG, "amqp thread cleanup")
                     channel.close()
                     connection.close()
                     break
                 } catch (e: InterruptedException) {
-                  Log.e(LOG_TAG, e.message)
+                    Log.e(LOG_TAG, e.message)
                     break
                 } catch (e: Exception) {
                     Log.e(LOG_TAG, e.message)
@@ -345,6 +362,7 @@ class LambaMasterService : Service() {
 
     @Synchronized private fun stopAMQP() {
         amqpThread?.let {
+            Log.i(LOG_TAG, "interrupt amqp thread")
             it.interrupt()
         }
         synchronized(amqpRunningLock) {
@@ -376,12 +394,22 @@ class LambaMasterService : Service() {
     }
 
     inner class EventBinder() : IEvent.Stub(), IBinder {
-        override fun sendMessage(event: Event?) {
+        override fun sendMessage(event: Event?, waitReply: Boolean) {
             Log.i(LOG_TAG, "receive event $event")
             if (eventHandler != null) {
                 Log.i(LOG_TAG, "send event $event to event handler")
                 var msg = Message.obtain()
                 msg.obj = event
+                if (waitReply) {
+                    var eventQueue = LinkedBlockingDeque<String>(1)
+                    synchronized(directEventQueues) {
+                        directEventQueues[event!!.name] = eventQueue
+                    }
+                    synchronized(eventCallbacks) {
+                        Log.i(LOG_TAG, "add event callback for $event")
+                        eventCallbacks[event!!.name] = DirectEventCallback(eventQueue)
+                    }
+                }
                 eventHandler!!.sendMessage(msg)
             } else {
                 Log.e(LOG_TAG, "event handler is not ready yet")
@@ -513,11 +541,13 @@ class LambaMasterService : Service() {
         private val NOTIFICATION_CHANNEL_ID = "lambda_master"
         private val NOTIFICATION_CHANNEL_NAME = "lambda_master"
         public var eventCallbacks = mutableMapOf<String, EventCallback>()
+        public var directEventQueues = mutableMapOf<String, LinkedBlockingDeque<String> >()
         public fun handleEventCallback(name: String, payload: String) {
             var callback: EventCallback? = null
             synchronized(eventCallbacks) {
                 callback = eventCallbacks.remove(name)
             }
+            Log.i(LOG_TAG, "event callback $callback for name=$name and payload=$payload")
             callback?.let {
                 it.callback(name, payload)
             }
