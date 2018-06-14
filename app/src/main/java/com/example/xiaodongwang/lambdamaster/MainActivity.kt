@@ -51,8 +51,18 @@ class MainActivity : AppCompatActivity() {
         override fun onClick(v: View?) {
             val intent = Intent(this@MainActivity, LambaMasterService::class.java)
             Log.i(LOG_TAG, "bind service")
+            if (serviceBond) {
+                Log.e(LOG_TAG, "service is already bond")
+                Toast.makeText(
+                        this@MainActivity, "service is already bond",
+                        Toast.LENGTH_SHORT
+                ).show()
+                return
+            }
             if(!bindService(intent, eventConnection, BIND_AUTO_CREATE)) {
                 Log.e(LOG_TAG, "failed to bind service")
+            } else {
+                serviceBond = true
             }
         }
     }
@@ -60,7 +70,16 @@ class MainActivity : AppCompatActivity() {
     inner class UnbindService : View.OnClickListener {
         override fun onClick(v: View?) {
             Log.i(LOG_TAG, "unbind service")
-            unbindService(eventConnection)
+            if (serviceBond) {
+                unbindService(eventConnection)
+                serviceBond = false
+            } else {
+                Log.e(LOG_TAG, "service is not bond")
+                Toast.makeText(
+                        this@MainActivity, "service is not bond",
+                        Toast.LENGTH_SHORT
+                ).show()
+            }
         }
     }
 
@@ -146,12 +165,17 @@ class MainActivity : AppCompatActivity() {
                     this@MainActivity, "service is unbond", Toast.LENGTH_SHORT
             ).show()
         }
+
+        override fun onBindingDied(name: ComponentName?) {
+            Log.i(LOG_TAG, "service bond is dead")
+        }
     }
 
     private var dbHelper: DBOpenHelper? = null
     private var lambdaList: ArrayList<Lambda>? = null
     private var lambdasAdapter: LambdaAdapter? = null
     private var iEvent: IEvent? = null
+    private var serviceBond = false
     private var eventConnection = EventConnection()
     private var sharedPrefs: SharedPreferences? = null
     @Volatile private var amqpThreadRunning = false
