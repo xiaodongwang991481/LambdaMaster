@@ -12,7 +12,6 @@ class LambaResultReceiver : BroadcastReceiver() {
         var data = intent.extras
         val name = data.getString("name")
         val payload = data.getString("payload")
-        LambaMasterService.handleEventCallback(name, payload)
         Log.i(
                 LOG_TAG,
                 "receive lamba result $name=$payload"
@@ -21,6 +20,7 @@ class LambaResultReceiver : BroadcastReceiver() {
                 context,
                 "receive lambda result $name=$payload", Toast.LENGTH_LONG
         ).show()
+        LambaMasterService.handleEventCallback(name, payload)
     }
 
     companion object {

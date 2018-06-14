@@ -411,7 +411,7 @@ class MainActivity : AppCompatActivity() {
                             .replyTo(replyQueueName)
                             .build()
                 }
-                channel.basicPublish(exchangeName, routingKey!!, props, message!!.toByteArray())
+                channel.basicPublish(exchangeName, routingKey, props, message!!.toByteArray())
                 if (!replyQueueName.isNullOrBlank()) {
                     Log.i(LOG_TAG, "wait for reply in queue $replyQueueName")
                     val response = ArrayBlockingQueue<String>(1)
@@ -423,9 +423,9 @@ class MainActivity : AppCompatActivity() {
                             if (properties != null) {
                                 var correlationId = properties.correlationId
                                 if (!corrId.isNullOrBlank() && correlationId.equals(corrId)) {
-                                    var message = String(body)
+                                    var replyMessage = String(body)
                                     response.put(message)
-                                    Log.i(LOG_TAG, "receive callback with message=$message")
+                                    Log.i(LOG_TAG, "receive callback with message=$replyMessage")
                                 } else {
                                     Log.e(LOG_TAG, "unknown correlation id=$correlationId")
                                 }
@@ -445,6 +445,21 @@ class MainActivity : AppCompatActivity() {
                 Log.e(LOG_TAG, e.message)
             }
             amqpThreadRunning = false
+        }
+    }
+
+    inner class DirectEventCallback: IEventCallback.Stub {
+        val lock: Object
+
+        constructor(lock: Object) : super() {
+            this.lock = lock
+        }
+
+        override fun eventCallback(name: String, payload: String) {
+            Log.i(LOG_TAG, "receive payload $payload for name $name")
+            synchronized(lock) {
+                lock.notifyAll()
+            }
         }
     }
 
@@ -488,19 +503,16 @@ class MainActivity : AppCompatActivity() {
         thread(start=true) {
             directThreadRunning = true
             var event = Event(uuid, lambdaFound, payLoad)
-            iEvent!!.sendMessage(event, waitReply)
+            var lock = Object()
+            var eventCallback: IEventCallback? = null
             if (waitReply) {
-                var eventQueue: LinkedBlockingDeque<String>? = null
-                synchronized(LambaMasterService.directEventQueues) {
-                    eventQueue = LambaMasterService.directEventQueues.remove(uuid)
+                eventCallback = DirectEventCallback(lock)
+            }
+            synchronized(lock) {
+                iEvent!!.sendMessage(event, eventCallback)
+                if (eventCallback != null) {
+                    lock.wait()
                 }
-                Log.i(LOG_TAG, "wait reply in queue $eventQueue")
-                eventQueue?.let {
-                    val replyPayload = it.take()
-                    Log.i(LOG_TAG, "receive reply $replyPayload for id=$uuid")
-                }
-            } else {
-                Log.i(LOG_TAG, "do not wait for reply")
             }
             directThreadRunning = false
         }

@@ -64,24 +64,23 @@ class LambaMasterService : Service() {
     }
 
     inner class DirectEventCallback: EventCallback {
-        val eventQueue: LinkedBlockingDeque<String>
+        val eventCallback: IEventCallback
 
-        constructor(eventQueue: LinkedBlockingDeque<String>) {
-            this.eventQueue = eventQueue
+        constructor(eventCallback: IEventCallback) {
+            this.eventCallback = eventCallback
         }
 
         override fun callback(name: String, payload: String) {
-            Log.i(LOG_TAG, "put payload $payload to queue $eventQueue")
-            eventQueue.putLast(payload)
+            Log.i(LOG_TAG, "call event callback stub $eventCallback")
+            eventCallback.eventCallback(name, payload)
         }
     }
 
     private var dbHelper: DBOpenHelper? = null
     private var lambdaList: ArrayList<Lambda>? = null
     private var sharedPrefs: SharedPreferences? = null
-    @Volatile var amqpThreadRunning = false
-    private var amqpRunningLock = Object()
     private var amqpThread: Thread? = null
+    @Volatile private var amqpThreadRunning = false
     private var amqpEventQueue = LinkedBlockingDeque<AmqpEventCallbackInQueue>()
 
     inner class LambdaExecuteConsumer(
@@ -271,7 +270,7 @@ class LambaMasterService : Service() {
             }
             factory.setAutomaticRecoveryEnabled(true)
             Log.i(LOG_TAG, "start ampq thread")
-            while (true) {
+            while (amqpThreadRunning) {
                 try {
                     var connection = factory.newConnection()
                     var channel = connection!!.createChannel()
@@ -329,14 +328,21 @@ class LambaMasterService : Service() {
                             LambdaExecuteConsumer(channel, routingKeyExecuteHandlers, defaultRoutingKeyExecuteHandler)
                     )
                     Log.i(LOG_TAG, "wait for callbacks")
-                    while (true) {
+                    while (amqpThreadRunning) {
                         try {
                             var amqpCallback = amqpEventQueue.takeFirst()
                             Log.i(LOG_TAG, "receive callback $amqpCallback")
                             amqpCallback.callback(channel)
                         } catch (e: InterruptedException) {
-                            Log.e(LOG_TAG, e.message)
+                            Log.e(LOG_TAG, "queue Interrupted exception: ${e.message}")
                             break
+                        } catch (e: Exception) {
+                            Log.e(LOG_TAG, "general queue exception: ${e.message}")
+                            try {
+                                Thread.sleep(1000)
+                            } catch (e: Exception) {
+                                break
+                            }
                         }
                     }
                     Log.i(LOG_TAG, "amqp thread cleanup")
@@ -344,34 +350,29 @@ class LambaMasterService : Service() {
                     connection.close()
                     break
                 } catch (e: InterruptedException) {
-                    Log.e(LOG_TAG, e.message)
+                    Log.e(LOG_TAG, "interruptedException: ${e.message}")
                     break
                 } catch (e: Exception) {
-                    Log.e(LOG_TAG, e.message)
-                    Thread.sleep(1000)
+                    Log.e(LOG_TAG, "general exception: ${e.message}")
+                    try {
+                        Thread.sleep(1000)
+                    } catch (e: Exception) {
+                        break
+                    }
                 }
             }
             Log.i(LOG_TAG, "amqp thread is finished")
-            synchronized(amqpRunningLock) {
-                amqpThreadRunning = false
-                Log.i(LOG_TAG, "amqp thread notify finished")
-                amqpRunningLock.notifyAll()
-            }
         }
     }
 
     @Synchronized private fun stopAMQP() {
         amqpThread?.let {
+            amqpThreadRunning = false
             Log.i(LOG_TAG, "interrupt amqp thread")
             it.interrupt()
+            it.join()
         }
-        synchronized(amqpRunningLock) {
-            while (amqpThreadRunning) {
-                Log.i(LOG_TAG, "amqp thread wait for finished")
-                amqpRunningLock.wait()
-            }
-            Log.i(LOG_TAG, "amqp thread is finished")
-        }
+        Log.i(LOG_TAG, "amqp thread is stopped")
     }
 
     private fun startInForeground() {
@@ -394,20 +395,16 @@ class LambaMasterService : Service() {
     }
 
     inner class EventBinder() : IEvent.Stub(), IBinder {
-        override fun sendMessage(event: Event?, waitReply: Boolean) {
+        override fun sendMessage(event: Event, eventCallback: IEventCallback?) {
             Log.i(LOG_TAG, "receive event $event")
             if (eventHandler != null) {
                 Log.i(LOG_TAG, "send event $event to event handler")
                 var msg = Message.obtain()
                 msg.obj = event
-                if (waitReply) {
-                    var eventQueue = LinkedBlockingDeque<String>(1)
-                    synchronized(directEventQueues) {
-                        directEventQueues[event!!.name] = eventQueue
-                    }
+                if (eventCallback != null) {
                     synchronized(eventCallbacks) {
                         Log.i(LOG_TAG, "add event callback for $event")
-                        eventCallbacks[event!!.name] = DirectEventCallback(eventQueue)
+                        eventCallbacks[event.name] = DirectEventCallback(eventCallback)
                     }
                 }
                 eventHandler!!.sendMessage(msg)
@@ -541,7 +538,6 @@ class LambaMasterService : Service() {
         private val NOTIFICATION_CHANNEL_ID = "lambda_master"
         private val NOTIFICATION_CHANNEL_NAME = "lambda_master"
         public var eventCallbacks = mutableMapOf<String, EventCallback>()
-        public var directEventQueues = mutableMapOf<String, LinkedBlockingDeque<String> >()
         public fun handleEventCallback(name: String, payload: String) {
             var callback: EventCallback? = null
             synchronized(eventCallbacks) {
