@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.widget.Toast
 import android.app.PendingIntent
 import android.content.*
+import android.os.Handler
 import android.preference.PreferenceManager
 import android.widget.ViewAnimator
 import com.google.gson.Gson
@@ -51,7 +52,7 @@ class MainActivity : AppCompatActivity() {
         override fun onClick(v: View?) {
             val intent = Intent(this@MainActivity, LambaMasterService::class.java)
             Log.i(LOG_TAG, "bind service")
-            if (serviceBond) {
+            if (iEvent != null && iEvent!!.asBinder().isBinderAlive) {
                 Log.e(LOG_TAG, "service is already bond")
                 Toast.makeText(
                         this@MainActivity, "service is already bond",
@@ -61,8 +62,6 @@ class MainActivity : AppCompatActivity() {
             }
             if(!bindService(intent, eventConnection, BIND_AUTO_CREATE)) {
                 Log.e(LOG_TAG, "failed to bind service")
-            } else {
-                serviceBond = true
             }
         }
     }
@@ -70,9 +69,8 @@ class MainActivity : AppCompatActivity() {
     inner class UnbindService : View.OnClickListener {
         override fun onClick(v: View?) {
             Log.i(LOG_TAG, "unbind service")
-            if (serviceBond) {
+            if (iEvent != null && iEvent!!.asBinder().isBinderAlive) {
                 unbindService(eventConnection)
-                serviceBond = false
             } else {
                 Log.e(LOG_TAG, "service is not bond")
                 Toast.makeText(
@@ -175,11 +173,46 @@ class MainActivity : AppCompatActivity() {
     private var lambdaList: ArrayList<Lambda>? = null
     private var lambdasAdapter: LambdaAdapter? = null
     private var iEvent: IEvent? = null
-    private var serviceBond = false
     private var eventConnection = EventConnection()
     private var sharedPrefs: SharedPreferences? = null
+    private var UIHander = Handler()
     @Volatile private var amqpThreadRunning = false
+    private var amqpThreadLock = Object()
+    private var directThreadLock = Object()
     @Volatile private var directThreadRunning = false
+
+    inner class PlayMessage: Runnable {
+        val name: String
+        val payload: String
+
+        constructor(name: String, payload: String) {
+            this.name = name
+            this.payload = payload
+        }
+        override fun run() {
+            Log.i(LOG_TAG, "play message name=$name and payload=$payload")
+            Toast.makeText(
+                    this@MainActivity, "play reply name=$name and payload=$payload",
+                    Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    inner class PlayErrorMessage: Runnable {
+        val message: String
+
+        constructor(message: String) {
+            this.message = message
+
+        }
+        override fun run() {
+            Log.i(LOG_TAG, "play error message $message")
+            Toast.makeText(
+                    this@MainActivity, "play error message=$message",
+                    Toast.LENGTH_LONG
+            ).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         requestPermissions()
@@ -209,6 +242,13 @@ class MainActivity : AppCompatActivity() {
         send_message.setOnClickListener(SendMessage())
         settings.setOnClickListener(Settings())
         send_message_by_rabbitmq.setOnClickListener(SendMessageByRabbitMQ())
+    }
+
+    override fun onDestroy() {
+        Log.i(LOG_TAG, "destroy activity")
+        amqpThreadLock.notifyAll()
+        directThreadLock.notifyAll()
+        super.onDestroy()
     }
 
     override fun onSaveInstanceState(outState: Bundle?) {
@@ -368,7 +408,7 @@ class MainActivity : AppCompatActivity() {
             Log.e(LOG_TAG, "not ready to send message")
             return
         }
-        var routingKey: String? = null
+        var routingKey: String
         var exchangeName = ""
         if (rabbitmq_exchange_name != null && !rabbitmq_exchange_name.text.isNullOrBlank()) {
             exchangeName = rabbitmq_exchange_name.text.toString()
@@ -376,7 +416,7 @@ class MainActivity : AppCompatActivity() {
         Log.i(LOG_TAG, "exchangeName=$exchangeName")
         var actionName = action_name.text.toString()
         var payLoad = payload.text.toString()
-        var message: String? = null
+        var message: String
         if (!exchangeName.isNullOrBlank()) {
             message = payLoad
             routingKey = actionName
@@ -435,10 +475,10 @@ class MainActivity : AppCompatActivity() {
                             .replyTo(replyQueueName)
                             .build()
                 }
-                channel.basicPublish(exchangeName, routingKey, props, message!!.toByteArray())
+                channel.basicPublish(exchangeName, routingKey, props, message.toByteArray())
                 if (!replyQueueName.isNullOrBlank()) {
+                    var amqpThreadNotified = false
                     Log.i(LOG_TAG, "wait for reply in queue $replyQueueName")
-                    val response = ArrayBlockingQueue<String>(1)
                     channel.basicConsume(replyQueueName, true, object : DefaultConsumer(channel) {
                         override fun handleDelivery(
                                 consumerTag: String?, envelope: Envelope,
@@ -448,18 +488,27 @@ class MainActivity : AppCompatActivity() {
                                 var correlationId = properties.correlationId
                                 if (!corrId.isNullOrBlank() && correlationId.equals(corrId)) {
                                     var replyMessage = String(body)
-                                    response.put(message)
                                     Log.i(LOG_TAG, "receive callback with message=$replyMessage")
+                                    UIHander.post(PlayMessage(correlationId, message))
+                                    synchronized(amqpThreadLock) {
+                                        amqpThreadNotified = true
+                                        amqpThreadLock.notifyAll()
+                                    }
                                 } else {
                                     Log.e(LOG_TAG, "unknown correlation id=$correlationId")
+                                    UIHander.post(PlayErrorMessage("unknown correlation id=$correlationId"))
                                 }
                             } else {
-                                Log.e(LOG_TAG, "properties is null")
+                                Log.e(LOG_TAG, "reply properties is null")
+                                UIHander.post(PlayErrorMessage("reply properties is null"))
                             }
                         }
                     })
-                    val replyPayload = response.take()
-                    Log.i(LOG_TAG, "receive reply payload=$replyPayload")
+                    synchronized(amqpThreadLock) {
+                        if (!amqpThreadNotified) {
+                            amqpThreadLock.wait()
+                        }
+                    }
                 } else {
                     Log.i(LOG_TAG, "do not wait for reply")
                 }
@@ -472,17 +521,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    inner class DirectEventCallback: IEventCallback.Stub {
-        val lock: Object
-
-        constructor(lock: Object) : super() {
-            this.lock = lock
-        }
-
+    inner class DirectEventCallback(): IEventCallback.Stub() {
         override fun eventCallback(name: String, payload: String) {
             Log.i(LOG_TAG, "receive payload $payload for name $name")
-            synchronized(lock) {
-                lock.notifyAll()
+            UIHander.post(PlayMessage(name, payload))
+            synchronized(directThreadLock) {
+                directThreadLock.notifyAll()
             }
         }
     }
@@ -527,16 +571,13 @@ class MainActivity : AppCompatActivity() {
         thread(start=true) {
             directThreadRunning = true
             var event = Event(uuid, lambdaFound, payLoad)
-            var lock = Object()
-            var eventCallback: IEventCallback? = null
             if (waitReply) {
-                eventCallback = DirectEventCallback(lock)
-            }
-            synchronized(lock) {
-                iEvent!!.sendMessage(event, eventCallback)
-                if (eventCallback != null) {
-                    lock.wait()
+                synchronized(directThreadLock) {
+                    iEvent!!.sendMessage(event, DirectEventCallback())
+                    directThreadLock.wait()
                 }
+            } else {
+                iEvent!!.sendMessage(event, null)
             }
             directThreadRunning = false
         }
